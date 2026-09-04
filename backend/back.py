@@ -339,6 +339,21 @@ def ejecutar_scrapeo() -> List[Dict]:
                 except Exception:
                     pass
 
+                # Evitar duplicados: omitir si ya existe la misma clave (nombre, fecha, hora, ubicacion)
+                try:
+                    existente = Conciertos.query.filter(
+                        Conciertos.nombre == nombre_evento,
+                        Conciertos.fecha == nueva_fecha,
+                        Conciertos.hora == nueva_hora,
+                        Conciertos.ubicacion == ubicacion_obj.id
+                    ).first()
+                    if existente:
+                        print(f"Ya existe en la BD: '{nombre_evento}' en {nueva_fecha} — se omite")
+                        continue
+                except Exception as e:
+                    print(f"Error al verificar existencia: {e}")
+                    continue
+
                 nuevo_concierto = Conciertos(
                     nombre=nombre_evento,
                     artista=artista,
@@ -363,6 +378,10 @@ def ejecutar_scrapeo() -> List[Dict]:
         print(f"\n{'='*50}")
         print(f"Total de conciertos extraídos: {len(conciertos)}")
         print(f"{'='*50}")
+
+        # Mantener la base vigente: borrar pasados y duplicados tras cada scrapeo
+        eliminar_conciertos_pasados()
+        eliminar_duplicados()
         
     except Exception as e:
         print(f"Error al obtener la página principal: {str(e)}")
@@ -430,38 +449,50 @@ def shutdown_session(exception=None):
 
 
 
+def eliminar_conciertos_pasados():
+    try:
+        hoy = date.today()
+        eliminados = db.session.query(Conciertos).filter(Conciertos.fecha < hoy).delete(synchronize_session=False)
+        db.session.commit()
+        print(f"Limpieza: {eliminados} conciertos pasados eliminados.")
+        return eliminados
+    except Exception as e:
+        print(f"Error al eliminar conciertos pasados: {e}")
+        db.session.rollback()
+        return 0
+
+
+def eliminar_duplicados():
+    try:
+        resultado = db.session.execute(db.text(
+            """
+            DELETE FROM conciertos a
+            USING conciertos b
+            WHERE a.id > b.id
+              AND a.nombre = b.nombre
+              AND a.fecha IS NOT DISTINCT FROM b.fecha
+              AND a.hora IS NOT DISTINCT FROM b.hora
+              AND a.ubicacion IS NOT DISTINCT FROM b.ubicacion
+            """
+        ))
+        db.session.commit()
+        print(f"Limpieza: {resultado.rowcount} duplicados eliminados.")
+        return resultado.rowcount
+    except Exception as e:
+        print(f"Error al eliminar duplicados: {e}")
+        db.session.rollback()
+        return 0
+
+
 def cronjob_eliminar_conciertos():
-    print("Iniciando cronjob para eliminar conciertos pasados y duplicados...")
+    print("Iniciando cronjob diario de limpieza (pasados + duplicados)...")
     while True:
         try:
             with app.app_context():
-                # Eliminar conciertos pasados
-                hoy = date.today()
-                conciertos_pasados = Conciertos.query.filter(Conciertos.fecha < hoy).all()
-                cantidad_pasados = len(conciertos_pasados)
-                for concierto in conciertos_pasados:
-                    db.session.delete(concierto)
-                
-                # Eliminar conciertos duplicados
-                # Buscar duplicados (mismo nombre, artista, fecha y ubicación)
-                conciertos = Conciertos.query.all()
-                vistos = {}
-                cantidad_duplicados = 0
-                
-                for concierto in conciertos:
-                    clave = (concierto.nombre, concierto.artista, concierto.fecha, concierto.ubicacion)
-                    if clave in vistos:
-                        # Es un duplicado, eliminarlo
-                        db.session.delete(concierto)
-                        cantidad_duplicados += 1
-                    else:
-                        # Guardar el primero que encontramos
-                        vistos[clave] = concierto
-                
-                db.session.commit()
-                print(f"Cronjob ejecutado: {cantidad_pasados} conciertos pasados eliminados, {cantidad_duplicados} duplicados eliminados.")
+                eliminar_conciertos_pasados()
+                eliminar_duplicados()
         except Exception as e:
-            print(f"Error en cronjob eliminar_conciertos_pasados: {e}")
+            print(f"Error en cronjob de limpieza: {e}")
             with app.app_context():
                 db.session.rollback()
         time.sleep(24 * 60 * 60)  # Espera 24 horas
@@ -472,15 +503,24 @@ def scheduler_scraper():
     if interval_minutos <= 0:
         print("Scraper automático desactivado (SCRAPER_INTERVALO_MINUTOS=0).")
         return
-    print(f"Scraper automático activado: corre cada {interval_minutos} minutos.")
+    print(f"Scraper automático activado: primer corrido inmediato, luego cada {interval_minutos} minutos.")
     while True:
-        time.sleep(interval_minutos * 60)
         try:
             print("Ejecutando scrapeo programado...")
             with app.app_context():
                 ejecutar_scrapeo()
         except Exception as e:
             print(f"Error en scrapeo programado: {e}")
+        time.sleep(interval_minutos * 60)
+
+# Limpieza inicial al arrancar (pasados + duplicados)
+try:
+    with app.app_context():
+        eliminar_conciertos_pasados()
+        eliminar_duplicados()
+        print("Limpieza inicial completada.")
+except Exception as e:
+    print(f"AVISO: limpieza inicial falló: {e}")
 
 # Iniciar procesos en segundo plano al arrancar el servicio
 if os.getenv("KEEP_ALIVE_URL") or os.getenv("RENDER_EXTERNAL_URL"):
