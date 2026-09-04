@@ -1,0 +1,39 @@
+.pie-de-pagina {
+    background-color: #1a1a1a;
+    color: #fff;
+    padding: 30px 20px;
+    text-align: center;
+    font-family: 'Arial', sans-serif;
+}
+
+.pie-contenedor {
+    display: flex;
+    flex-direction: column;
+    align-items: center;
+    gap: 15px;
+}
+
+.pie-enlaces {
+    display: flex;
+    gap: 25px;
+    font-size: 1.1rem;
+}
+
+.pie-enlaces a {
+    color: #ffffff; /* dorado */
+    text-decoration: none;
+    display: flex;
+    align-items: center;
+    gap: 8px;
+    transition: color 0.3s;
+}
+
+.pie-enlaces a:hover {
+    color: #7380c9;
+}
+
+.pie-copy {
+    margin-top: 20px;
+    font-size: 0.9rem;
+    color: #aaa;
+}

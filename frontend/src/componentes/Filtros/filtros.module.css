@@ -1,0 +1,122 @@
+.filtros {
+  background-color: #ffffff;
+  color: #1c1c1c;
+  border: 1px solid #e5e5e5;
+  border-radius: 12px;
+  padding: 16px;
+  margin-bottom: 16px;
+  box-shadow: 0 2px 8px rgba(0,0,0,0.05);
+}
+
+.filtros h2 {
+  margin: 0 0 12px 0;
+  font-size: 1.1rem;
+  font-weight: 800;
+  color: #1c1c1c;
+}
+
+/* Etiquetas */
+.filtros label {
+  display: block;
+  margin: 10px 0 6px;
+  font-weight: 700;
+  color: #555;
+}
+
+/* Controles */
+.filtros select,
+.filtros input[type="range"],
+.filtros input[type="number"] {
+  width: 100%;
+  padding: 8px 10px;
+  border-radius: 8px;
+  border: 1px solid #cfd8dc;
+  background-color: #f8fafc;
+  color: #1c1c1c;
+  transition: border-color .2s, background-color .2s, box-shadow .2s;
+  box-sizing: border-box;
+  outline: none;
+}
+
+.filtros select:hover,
+.filtros input[type="number"]:hover {
+  background-color: #eef2f7;
+  border-color: #b0bec5;
+}
+
+.filtros select:focus,
+.filtros input[type="range"]:focus,
+.filtros input[type="number"]:focus {
+  border-color: #00AEEF;
+  box-shadow: 0 0 0 3px rgba(0,174,239,0.25);
+}
+
+.filtros button {
+  margin-top: 12px;
+  padding: 8px 14px;
+  border-radius: 8px;
+  border: 1px solid #cfd8dc;
+  background-color: #f8fafc;
+  color: #1c1c1c;
+  font-weight: 700;
+  cursor: pointer;
+  transition: background-color .2s, border-color .2s, color .2s, transform .05s;
+}
+
+.filtros button:hover {
+  background-color: #eef2f7;
+  border-color: #b0bec5;
+}
+
+.filtros button:active {
+  transform: translateY(1px);
+}
+
+/* ====== Modo oscuro ====== */
+:global(html.dark) .filtros {
+  background-color: #2E2E2E;
+  color: #F5F5F5;
+  border: 1px solid #1C1C1C;
+  box-shadow: 0 4px 14px rgba(0,0,0,0.35);
+}
+
+:global(html.dark) .filtros h2 {
+  color: #F5F5F5;
+}
+
+:global(html.dark) .filtros label {
+  color: #B0B0B0;
+}
+
+:global(html.dark) .filtros select,
+:global(html.dark) .filtros input[type="range"],
+:global(html.dark) .filtros input[type="number"] {
+  background-color: #1C1C1C;
+  border-color: #2a2a2a;
+  color: #F5F5F5;
+}
+
+:global(html.dark) .filtros select:hover,
+:global(html.dark) .filtros input[type="number"]:hover {
+  background-color: #272727;
+  border-color: #333333;
+}
+
+:global(html.dark) .filtros select:focus,
+:global(html.dark) .filtros input[type="range"]:focus,
+:global(html.dark) .filtros input[type="number"]:focus {
+  border-color: #00AEEF;
+  box-shadow: 0 0 0 3px rgba(0,174,239,0.25);
+}
+
+:global(html.dark) .filtros button {
+  background-color: #00AEEF;
+  border-color: #00AEEF;
+  color: #1C1C1C;
+}
+
+:global(html.dark) .filtros button:hover {
+  background-color: #0077A3;
+  border-color: #0077A3;
+  color: #F5F5F5;
+}

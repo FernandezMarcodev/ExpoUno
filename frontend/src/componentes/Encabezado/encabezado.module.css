@@ -1,0 +1,80 @@
+/* Header base */
+.encabezado {
+  position: sticky;
+  top: 0;
+  z-index: 50;
+  padding: 16px 20px;
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  border-bottom: 1px solid #e5e5e5;
+  background-color: #ffffff;
+  color: #1c1c1c;
+}
+
+.encabezado h1 {
+  margin: 0;
+  font-size: 1.25rem;
+  font-weight: 700;
+}
+
+.botonIcono {
+  width: 36px;
+  height: 36px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  padding: 0;
+  line-height: 0;
+  box-sizing: border-box;
+  border-radius: 9999px;
+  border: 1px solid #d0d0d0;
+  background-color: #f9f9f9;
+  color: #1c1c1c;
+  cursor: pointer;
+  transition: background-color .2s, border-color .2s, transform .05s;
+}
+
+.botonIcono:hover { 
+  background-color:#f0f0f0; border-color:#c6c6c6; 
+}
+
+.botonIcono:active { 
+  transform: translateY(1px); 
+}
+
+.iconoContraste {
+  display: block;
+  width: 20px;
+  height: 20px;
+}
+
+/* ===== Modo oscuro ===== */
+
+:global(html.dark) .encabezado {
+  background: linear-gradient(180deg, #222, #1C1C1C);
+  color: #F5F5F5;
+  border-bottom: 1px solid #2E2E2E;
+  box-shadow:
+    0 1px 0 rgba(255,255,255,0.03) inset,
+    0 6px 18px rgba(0,0,0,0.35);
+}
+
+:global(html.dark) .encabezado h1 {
+  color: #F5F5F5;
+}
+
+:global(html.dark) .botonIcono {
+  background-color: #00AEEF;
+  border-color: #00AEEF;
+  color: #1C1C1C;
+}
+
+:global(html.dark) .botonIcono:hover {
+  background-color: #0096cf;
+  border-color: #0096cf;
+}
+
+:global(html.dark) .iconoContraste { 
+  color: #0e0e0e; 
+}

@@ -1,0 +1,167 @@
+.tarjeta {
+  background-color: #ffffff;
+  color: #1c1c1c;
+  border: 1px solid #e5e5e5;
+  border-radius: 12px;
+  padding: 16px;
+  margin-bottom: 16px;
+  box-shadow: 0 2px 8px rgba(0,0,0,0.05);
+  transition: transform .2s ease, box-shadow .2s ease, border-color .2s ease;
+}
+
+.tarjeta:hover {
+  transform: translateY(-2px);
+  box-shadow: 0 6px 16px rgba(0,0,0,0.10);
+}
+
+.tarjeta-seleccionada {
+  border-color: #00AEEF;
+}
+
+.cabecera-tarjeta {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px;
+  margin-bottom: 8px;
+}
+
+.nombre-concierto {
+  margin: 0;
+  font-size: 1.15rem;
+  font-weight: 800;
+  color: #1c1c1c;
+}
+
+.estado-agotado,
+.estado-disponible {
+  display: inline-flex;
+  align-items: center;
+  padding: 4px 10px;
+  border-radius: 9999px;
+  font-size: 0.75rem;
+  font-weight: 600;
+  border: 1px solid transparent;
+}
+
+.estado-agotado {
+  background-color: #ffe5e5;
+  color: #e53e3e;
+  border-color: #f7b6b6;
+}
+
+.estado-disponible {
+  background-color: #e6fffa;
+  color: #38b2ac;
+  border-color: #b7f2ea;
+}
+
+.info-concierto {
+  display: grid;
+  gap: 6px;
+  margin: 10px 0 14px;
+  color: #555;
+}
+
+.apto-menores {
+  display: inline-block;
+  margin-top: 6px;
+  padding: 2px 8px;
+  border-radius: 6px;
+  background-color: #eaf7e8;
+  color: #2f855a;
+  font-size: 0.75rem;
+  font-weight: 600;
+}
+
+.botones-concierto {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+  border-top: 1px solid #e5e5e5;
+  padding-top: 10px;
+}
+
+.botones-concierto > button,
+.botones-concierto > a {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  padding: 6px 12px;
+  border-radius: 8px;
+  text-decoration: none;
+  font-size: 0.875rem;
+  font-weight: 600;
+  border: 1px solid #cfd8dc;
+  background-color: #f8fafc;
+  color: #1c1c1c;
+  cursor: pointer;
+  transition: background-color .2s, border-color .2s, color .2s;
+}
+
+.botones-concierto > button:hover,
+.botones-concierto > a:hover {
+  text-decoration: none;
+  background-color: #eef2f7;
+  border-color: #b0bec5;
+}
+
+.botones-concierto > a:last-child {
+  background-color: #00AEEF;
+  border-color: #00AEEF;
+  color: #1C1C1C;
+}
+.botones-concierto > a:last-child:hover {
+  background-color: #0077A3;
+  border-color: #0077A3;
+  color: #F5F5F5;
+}
+
+/* ====== Modo oscuro con tu paleta ====== */
+:global(html.dark) .tarjeta {
+  background-color: #2E2E2E;
+  color: #F5F5F5;
+  border: 1px solid #1C1C1C;
+  box-shadow: 0 4px 14px rgba(0,0,0,0.35);
+}
+
+:global(html.dark) .nombre-concierto {
+  color: #F5F5F5;
+}
+
+:global(html.dark) .info-concierto {
+  color: #B0B0B0;
+}
+
+:global(html.dark) .apto-menores {
+  background-color: rgba(0,174,239,0.15);
+  color: #00AEEF;
+}
+
+:global(html.dark) .botones-concierto {
+  border-top-color: #1C1C1C;
+}
+
+:global(html.dark) .botones-concierto > button,
+:global(html.dark) .botones-concierto > a {
+  background-color: #1C1C1C;
+  border-color: #2a2a2a;
+  color: #F5F5F5;
+}
+
+:global(html.dark) .botones-concierto > button:hover,
+:global(html.dark) .botones-concierto > a:hover {
+  background-color: #272727;
+  border-color: #333333;
+}
+
+:global(html.dark) .botones-concierto > a:last-child {
+  background-color: #00AEEF;
+  border-color: #00AEEF;
+  color: #1C1C1C;
+}
+:global(html.dark) .botones-concierto > a:last-child:hover {
+  background-color: #0077A3;
+  border-color: #0077A3;
+  color: #F5F5F5;
+}

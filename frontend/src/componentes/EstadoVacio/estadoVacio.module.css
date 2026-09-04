@@ -1,0 +1,79 @@
+.estadoVacio {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  text-align: center;
+
+  background-color: #ffffff;
+  color: #1c1c1c;
+
+  border: 1px solid #e5e5e5;
+  border-radius: 12px;
+  padding: 32px;
+  margin: 16px 0;
+  box-shadow: 0 2px 8px rgba(0,0,0,0.05);
+}
+
+/* Título y descripción */
+.estadoVacio h3 {
+  margin: 0 0 8px 0;
+  font-size: 1.25rem;
+  font-weight: 800;
+  color: #1c1c1c;
+}
+
+.estadoVacio p {
+  max-width: 480px;
+  color: #555;
+  margin: 0;
+}
+
+.estadoVacio button {
+  margin-top: 20px;
+  padding: 8px 20px;
+  border-radius: 999px;
+  border: 1px solid #cfd8dc;
+  background-color: #f8fafc;
+  color: #1c1c1c;
+  font-weight: 700;
+  cursor: pointer;
+  transition: background-color .2s, border-color .2s, color .2s, transform .05s;
+}
+
+.estadoVacio button:hover {
+  background-color: #eef2f7;
+  border-color: #b0bec5;
+}
+
+.estadoVacio button:active {
+  transform: translateY(1px);
+}
+
+/* ====== Modo oscuro (paleta) ====== */
+:global(html.dark) .estadoVacio {
+  background-color: #2E2E2E;
+  color: #F5F5F5;
+  border: 1px solid #1C1C1C;
+  box-shadow: 0 4px 14px rgba(0,0,0,0.35);
+}
+
+:global(html.dark) .estadoVacio h3 {
+  color: #F5F5F5;
+}
+
+:global(html.dark) .estadoVacio p {
+  color: #B0B0B0;
+}
+
+:global(html.dark) .estadoVacio button {
+  background-color: #00AEEF;
+  border-color: #00AEEF;
+  color: #1C1C1C;
+}
+
+:global(html.dark) .estadoVacio button:hover {
+  background-color: #0077A3;
+  border-color: #0077A3;
+  color: #F5F5F5;
+}
