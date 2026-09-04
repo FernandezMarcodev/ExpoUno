@@ -36,11 +36,14 @@ DB_PORT = os.getenv("DB_PORT", "5432")
 DB_NAME = os.getenv("DB_NAME", "conciertos")
 DB_USER = os.getenv("DB_USER", "conciertos")
 DB_PASSWORD = os.getenv("DB_PASSWORD", "conciertos")
+DB_SSLMODE = os.getenv("DB_SSLMODE", "")
 
 app.config['SQLALCHEMY_DATABASE_URI'] = (
     f"postgresql://{DB_USER}:{quote_plus(DB_PASSWORD)}@"
     f"{DB_HOST}:{DB_PORT}/{DB_NAME}"
 )
+if DB_SSLMODE:
+    app.config['SQLALCHEMY_DATABASE_URI'] += f"?sslmode={DB_SSLMODE}"
 app.config['SQLALCHEMY_TRACK_MODIFICATIONS'] = False
 
 # CONFIGURACIÓN DEL POOL - Esto es lo importante
@@ -402,9 +405,9 @@ def get_coordenadas(location_name):
         return None, None
 
 def keep_alive():
-    url = os.getenv("KEEP_ALIVE_URL")
+    url = os.getenv("KEEP_ALIVE_URL") or os.getenv("RENDER_EXTERNAL_URL")
     if not url:
-        print("keep_alive desactivado (KEEP_ALIVE_URL vacía).")
+        print("keep_alive desactivado (sin KEEP_ALIVE_URL ni RENDER_EXTERNAL_URL).")
         return
     print(f"keep_alive activado hacia {url}")
     while True:
@@ -480,7 +483,7 @@ def scheduler_scraper():
             print(f"Error en scrapeo programado: {e}")
 
 # Iniciar procesos en segundo plano al arrancar el servicio
-if os.getenv("KEEP_ALIVE_URL"):
+if os.getenv("KEEP_ALIVE_URL") or os.getenv("RENDER_EXTERNAL_URL"):
     threading.Thread(target=keep_alive, daemon=True).start()
 if int(os.getenv("SCRAPER_INTERVALO_MINUTOS", "360")) > 0:
     threading.Thread(target=scheduler_scraper, daemon=True).start()
