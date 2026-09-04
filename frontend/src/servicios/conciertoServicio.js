@@ -1,6 +1,6 @@
 console.log('Cargando conciertoServicio.js - versión fetch para conciertos');
 
-const API_BASE_URL = import.meta.env.VITE_API_URL || 'https://back-conciertos.onrender.com';
+const API_BASE_URL = import.meta.env.VITE_API_URL || 'https://expouno-back.onrender.com';
 console.log('API_BASE_URL configurada:', API_BASE_URL);
 
 export const conciertoServicio = {

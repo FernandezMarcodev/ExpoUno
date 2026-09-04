@@ -1,7 +1,7 @@
 services:
   # Backend API (Flask + PostGIS). Base de datos externa: Supabase (Supavisor session pooler, IPv4).
   - type: web
-    name: back-conciertos
+    name: expouno-api
     runtime: python
     rootDir: backend
     plan: free
@@ -27,7 +27,7 @@ services:
 
   # Frontend (React + Vite) como sitio estático servido por CDN.
   - type: web
-    name: front-conciertos
+    name: expouno-web
     runtime: static
     rootDir: frontend
     buildCommand: npm ci && npm run build

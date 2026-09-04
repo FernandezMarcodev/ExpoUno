@@ -227,7 +227,10 @@ def ejecutar_scrapeo() -> List[Dict]:
         'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/91.0.4472.124 Safari/537.36'
     }
     try:
-        for page in range(1, 6):  # Paginación: páginas 1 a 5
+        claves_vigentes = set()
+        max_paginas = 60
+        page = 1
+        while True:
             url_base = f"{url}{page}"
             print("procesando pagina "+str(url_base))
             response = requests.get(url_base, headers=headers)
@@ -238,8 +241,12 @@ def ejecutar_scrapeo() -> List[Dict]:
                 'fs-cmsfilter-element': 'list'
             })
             if not lista_conciertos:
-                return conciertos
+                print("Sin lista de conciertos, se detiene la paginación.")
+                break
             items = lista_conciertos.find_all('div', {'role': 'listitem'})
+            if not items:
+                print("Página sin conciertos, se detiene la paginación.")
+                break
             for idx, item in enumerate(items, 1):
                 try:
                     link_element = item.find('a', class_='link-block-11')
@@ -339,16 +346,19 @@ def ejecutar_scrapeo() -> List[Dict]:
                 except Exception:
                     pass
 
-                # Evitar duplicados: omitir si ya existe la misma clave (nombre, fecha, hora, ubicacion)
+                # Registrar la clave vigente (artista, lugar, fecha, hora) para la sincronización
+                claves_vigentes.add(_clave_concierto(artista, nueva_fecha, nueva_hora, ubicacion_obj.id))
+
+                # Evitar duplicados: omitir si ya existe la misma clave (artista, lugar, fecha, hora)
                 try:
                     existente = Conciertos.query.filter(
-                        Conciertos.nombre == nombre_evento,
+                        func.lower(func.trim(Conciertos.artista)) == (artista or '').strip().lower(),
                         Conciertos.fecha == nueva_fecha,
                         Conciertos.hora == nueva_hora,
                         Conciertos.ubicacion == ubicacion_obj.id
                     ).first()
                     if existente:
-                        print(f"Ya existe en la BD: '{nombre_evento}' en {nueva_fecha} — se omite")
+                        print(f"Ya existe en la BD: '{artista}' en {nueva_fecha} {nueva_hora} — se omite")
                         continue
                 except Exception as e:
                     print(f"Error al verificar existencia: {e}")
@@ -373,15 +383,20 @@ def ejecutar_scrapeo() -> List[Dict]:
                     db.session.close()
                 # ----------------------------------
 
-                
-        
+            page += 1
+            if page > max_paginas:
+                print("Se alcanzó el tope de paginación, se detiene.")
+                break
+
         print(f"\n{'='*50}")
         print(f"Total de conciertos extraídos: {len(conciertos)}")
         print(f"{'='*50}")
 
-        # Mantener la base vigente: borrar pasados y duplicados tras cada scrapeo
+        # Mantener la base vigente: borrar pasados, duplicados y lo que ya no existe en agendade
         eliminar_conciertos_pasados()
         eliminar_duplicados()
+        if conciertos:
+            eliminar_conciertos_ausentes(claves_vigentes)
         
     except Exception as e:
         print(f"Error al obtener la página principal: {str(e)}")
@@ -443,6 +458,11 @@ def handle_db_timeout(e):
     db.session.close()
     return jsonify({"error": "Servidor ocupado, intenta nuevamente en unos segundos."}), 503
 
+@app.after_request
+def add_no_store(response):
+    response.headers["Cache-Control"] = "no-store, max-age=0"
+    return response
+
 @app.teardown_appcontext
 def shutdown_session(exception=None):
     db.session.remove()
@@ -469,7 +489,7 @@ def eliminar_duplicados():
             DELETE FROM conciertos a
             USING conciertos b
             WHERE a.id > b.id
-              AND a.nombre = b.nombre
+              AND lower(trim(a.artista)) = lower(trim(b.artista))
               AND a.fecha IS NOT DISTINCT FROM b.fecha
               AND a.hora IS NOT DISTINCT FROM b.hora
               AND a.ubicacion IS NOT DISTINCT FROM b.ubicacion
@@ -480,6 +500,36 @@ def eliminar_duplicados():
         return resultado.rowcount
     except Exception as e:
         print(f"Error al eliminar duplicados: {e}")
+        db.session.rollback()
+        return 0
+
+
+def _clave_concierto(artista, fecha, hora, ubicacion_id):
+    a = (artista or '').strip().lower()
+    f = '' if fecha is None else str(fecha)
+    h = '' if hora is None else hora.strftime('%H:%M')
+    return f"{a}|{f}|{h}|{ubicacion_id}"
+
+
+def eliminar_conciertos_ausentes(claves_vigentes):
+    if not claves_vigentes:
+        print("Sync: sin referencia (scrapeo sin datos), no se elimina nada.")
+        return 0
+    try:
+        conciertos_db = Conciertos.query.all()
+        a_eliminar = [
+            c.id for c in conciertos_db
+            if _clave_concierto(c.artista, c.fecha, c.hora, c.ubicacion) not in claves_vigentes
+        ]
+        if not a_eliminar:
+            print("Sync: todos los conciertos siguen existiendo en agendade.")
+            return 0
+        eliminados = db.session.query(Conciertos).filter(Conciertos.id.in_(a_eliminar)).delete(synchronize_session=False)
+        db.session.commit()
+        print(f"Sync: {eliminados} conciertos ya no existen en agendade — eliminados.")
+        return eliminados
+    except Exception as e:
+        print(f"Error al eliminar conciertos ausentes: {e}")
         db.session.rollback()
         return 0
 
