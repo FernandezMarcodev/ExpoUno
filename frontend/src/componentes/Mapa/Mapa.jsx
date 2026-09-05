@@ -56,6 +56,17 @@ const iconFor = (grupoConciertos) => {
   });
 };
 
+// Región renderizable: Buenos Aires y alrededores (mismo criterio que el backend).
+const AMBA_MIN_LAT = -35.15;
+const AMBA_MAX_LAT = -34.2;
+const AMBA_MIN_LNG = -58.95;
+const AMBA_MAX_LNG = -57.7;
+// Límite de navegación del mapa: Argentina completa.
+const ARG_MAX_BOUNDS = [[-55.05, -73.6], [-21.7, -53.6]];
+
+const enAmba = (lat, lng) =>
+  lat >= AMBA_MIN_LAT && lat <= AMBA_MAX_LAT && lng >= AMBA_MIN_LNG && lng <= AMBA_MAX_LNG;
+
 function Mapa({ centro, zoom, conciertos = [], ubicacionUsuario, radioKm, seleccionadoId }) {
   const centroInicial = centro || [-34.6037, -58.3816];
 
@@ -67,6 +78,7 @@ function Mapa({ centro, zoom, conciertos = [], ubicacionUsuario, radioKm, selecc
       .forEach(c => {
         const lat = c.ubicacion_detalle.coordenadas[1];
         const lng = c.ubicacion_detalle.coordenadas[0];
+        if (!enAmba(lat, lng)) return;
         const key = `${lat},${lng}`;
         if (!map.has(key)) {
           map.set(key, { lat, lng, conciertos: [] });
@@ -107,6 +119,8 @@ function Mapa({ centro, zoom, conciertos = [], ubicacionUsuario, radioKm, selecc
         center={centroInicial}
         zoom={zoom || 11}
         zoomControl={false}
+        maxBounds={ARG_MAX_BOUNDS}
+        maxBoundsViscosity={1.0}
         style={{ width: "100%", height: "700px" }}
         className={styles.mapa}
       >

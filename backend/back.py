@@ -438,14 +438,16 @@ def scrape_conciertos() -> List[Dict]:
 
 def get_coordenadas(location_name):
     """
-    Obtiene las coordenadas usando Nominatim de OpenStreetMap (gratuito)
+    Obtiene las coordenadas usando Nominatim de OpenStreetMap (gratuito).
+    Restringido a Argentina y al área AMBA para evitar geocodificar a otro país.
     """
     base_url = "https://nominatim.openstreetmap.org/search"
     
     params = {
         'q': location_name,
         'format': 'json',
-        'limit': 1
+        'limit': 5,
+        'countrycodes': 'ar'
     }
     
     headers = {
@@ -458,11 +460,12 @@ def get_coordenadas(location_name):
         data = response.json()
         
         if data and len(data) > 0:
-            lat = data[0]['lat']
-            lon = data[0]['lon']
-            return lat, lon
-        else:
-            return None, None
+            for resultado in data:
+                lat = float(resultado['lat'])
+                lon = float(resultado['lon'])
+                if en_amba(lon, lat):
+                    return str(lat), str(lon)
+        return None, None
     except Exception as e:
         print(f"Error al obtener coordenadas para {location_name}: {e}")
         return None, None
