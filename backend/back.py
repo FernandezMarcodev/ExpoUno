@@ -346,6 +346,15 @@ def ejecutar_scrapeo() -> List[Dict]:
                 else:
                     # Reusar la ubicación encontrada: su nombre define la clave estable
                     nombre_lugar_normalizado = (ubicacion_obj.nombre or '').strip().lower()
+                    punto_reuso = None
+                    if ubicacion_obj.coordenadas:
+                        try:
+                            punto_reuso = to_shape(ubicacion_obj.coordenadas)
+                        except Exception:
+                            punto_reuso = None
+                    if punto_reuso is None or not en_amba(punto_reuso.x, punto_reuso.y):
+                        print(f"'{ubicacion}' está fuera del área de Buenos Aires y alrededores, no se agrega el concierto '{nombre_evento}'")
+                        continue
 
                 # Parsear fecha y hora
                 nueva_fecha = None
@@ -515,12 +524,33 @@ def eliminar_fuera_de_amba():
                     punto = None
             if punto is None or not en_amba(punto.x, punto.y):
                 a_eliminar.append(c.id)
-        if not a_eliminar:
+        eliminados = 0
+        if a_eliminar:
+            eliminados = db.session.query(Conciertos).filter(Conciertos.id.in_(a_eliminar)).delete(synchronize_session=False)
+            db.session.commit()
+            print(f"Limpieza: {eliminados} conciertos fuera del área de Buenos Aires eliminados.")
+        else:
             print("Limpieza: sin conciertos fuera del área de Buenos Aires.")
-            return 0
-        eliminados = db.session.query(Conciertos).filter(Conciertos.id.in_(a_eliminar)).delete(synchronize_session=False)
-        db.session.commit()
-        print(f"Limpieza: {eliminados} conciertos fuera del área de Buenos Aires eliminados.")
+        # Eliminar también los lugares fuera de AMBA que quedaron sin conciertos,
+        # para que el próximo scrape no los reutilice al volver a aparecer el evento.
+        venues_eliminar = []
+        for v in Ubicaciones.query.all():
+            tiene_conciertos = db.session.query(Conciertos.id).filter(Conciertos.ubicacion == v.id).first() is not None
+            if tiene_conciertos:
+                continue
+            punto = None
+            if v.coordenadas:
+                try:
+                    punto = to_shape(v.coordenadas)
+                except Exception:
+                    punto = None
+            if punto is None or not en_amba(punto.x, punto.y):
+                venues_eliminar.append(v.id)
+        venues_borradas = 0
+        if venues_eliminar:
+            venues_borradas = db.session.query(Ubicaciones).filter(Ubicaciones.id.in_(venues_eliminar)).delete(synchronize_session=False)
+            db.session.commit()
+            print(f"Limpieza: {venues_borradas} lugares fuera del área de Buenos Aires eliminados.")
         return eliminados
     except Exception as e:
         print(f"Error al eliminar conciertos fuera del área de Buenos Aires: {e}")
@@ -629,7 +659,7 @@ def cronjob_eliminar_conciertos():
 
 # Scraper automático: ejecuta el scrapeo cada SCRAPER_INTERVALO_MINUTOS (0 = desactivado)
 def scheduler_scraper():
-    interval_minutos = int(os.getenv("SCRAPER_INTERVALO_MINUTOS", "360"))
+    interval_minutos = int(os.getenv("SCRAPER_INTERVALO_MINUTOS", "2880"))
     if interval_minutos <= 0:
         print("Scraper automático desactivado (SCRAPER_INTERVALO_MINUTOS=0).")
         return
@@ -657,7 +687,7 @@ except Exception as e:
 # Iniciar procesos en segundo plano al arrancar el servicio
 if os.getenv("KEEP_ALIVE_URL") or os.getenv("RENDER_EXTERNAL_URL"):
     threading.Thread(target=keep_alive, daemon=True).start()
-if int(os.getenv("SCRAPER_INTERVALO_MINUTOS", "360")) > 0:
+if int(os.getenv("SCRAPER_INTERVALO_MINUTOS", "2880")) > 0:
     threading.Thread(target=scheduler_scraper, daemon=True).start()
 threading.Thread(target=cronjob_eliminar_conciertos, daemon=True).start()
 

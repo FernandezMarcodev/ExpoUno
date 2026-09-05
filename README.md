@@ -54,7 +54,7 @@ El `.env` ya trae valores por defecto que funcionan para desarrollo:
 | `DB_PASSWORD` | `conciertos_dev` | Contraseña |
 | `PORT` | `5000` | Puerto del servidor API |
 | `HOST` | `0.0.0.0` | Host donde escucha el servidor |
-| `SCRAPER_INTERVALO_MINUTOS` | `360` | Frecuencia del scraper en minutos (`0` = desactivado) |
+| `SCRAPER_INTERVALO_MINUTOS` | `2880` | Frecuencia del scraper en minutos (48 h; `0` = desactivado) |
 | `KEEP_ALIVE_URL` | *(vacío)* | URL para ping de mantenimiento; vacío en local |
 
 ### 3. Instalar dependencias (entorno virtual recomendado)
@@ -107,7 +107,7 @@ Para cargar conciertos reales desde agendade.com.ar (tarda unos minutos, procesa
 Invoke-WebRequest -Uri "http://localhost:5000/scrape_conciertos_agendade" -UseBasicParsing
 ```
 
-> Requiere conexión a internet. Si el scraper automático está activo (`SCRAPER_INTERVALO_MINUTOS > 0`), esto ocurre solo cada 6 horas.
+> Requiere conexión a internet. Si el scraper automático está activo (`SCRAPER_INTERVALO_MINUTOS > 0`), esto ocurre solo cada 48 horas.
 
 ---
 
@@ -145,7 +145,7 @@ npm run preview    # sirve el build localmente
 
 ## Comportamiento automático del backend
 
-- **Scraper cada 6 horas** (`SCRAPER_INTERVALO_MINUTOS=360`): descarga los conciertos de agendade.com.ar e inserta los nuevos.
+- **Scraper cada 48 horas** (`SCRAPER_INTERVALO_MINUTOS=2880`): descarga los conciertos de agendade.com.ar e inserta los nuevos.
 - **Limpieza diaria**: un cronjob que corre cada 24 h elimina conciertos pasados y duplicados.
 - **Keep alive** (`KEEP_ALIVE_URL`): en producción apunta a la URL del servicio para evitar que duerma. En local va vacío.
 
