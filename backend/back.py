@@ -82,6 +82,15 @@ class Conciertos(db.Model):
     fecha = db.Column(DATE)
     hora = db.Column(TIME)
 
+# Región: solo Buenos Aires y alrededores (CABA + GBA + La Plata/Cañuelas).
+AMBA_MIN_LAT = -35.15
+AMBA_MAX_LAT = -34.2
+AMBA_MIN_LNG = -58.95
+AMBA_MAX_LNG = -57.7
+
+def en_amba(lng, lat):
+    return (AMBA_MIN_LAT <= lat <= AMBA_MAX_LAT) and (AMBA_MIN_LNG <= lng <= AMBA_MAX_LNG)
+
 # Al arrancar: asegurar extensión PostGIS y crear tablas si no existen (idempotente)
 with app.app_context():
     try:
@@ -309,13 +318,19 @@ def ejecutar_scrapeo() -> List[Dict]:
                     continue
 
                 # --- AGREGAR A LA BASE DE DATOS ---
-                # Buscar la ubicación por nombre usando ilike
-                ubicacion_obj = Ubicaciones.query.filter(Ubicaciones.nombre.ilike(f"%{ubicacion}%")).first()
+                # Buscar la ubicación: primero coincidencia exacta normalizada, luego aproximada
+                nombre_lugar_normalizado = (ubicacion or '').strip().lower()
+                ubicacion_obj = Ubicaciones.query.filter(func.lower(func.trim(Ubicaciones.nombre)) == nombre_lugar_normalizado).first()
+                if not ubicacion_obj:
+                    ubicacion_obj = Ubicaciones.query.filter(Ubicaciones.nombre.ilike(f"%{ubicacion}%")).first()
                 if not ubicacion_obj:
                     lat, lon = get_coordenadas(ubicacion)
                     # Si no se encuentran coordenadas, no agregar ni ubicación ni concierto
                     if not (lat and lon):
                         print(f"No se encontró ubicación para '{ubicacion}', no se agrega el concierto '{nombre_evento}'")
+                        continue
+                    if not en_amba(float(lon), float(lat)):
+                        print(f"'{ubicacion}' está fuera del área de Buenos Aires y alrededores, no se agrega el concierto '{nombre_evento}'")
                         continue
                     # Recuerda: primero longitud, luego latitud
                     punto = WKTElement(f'POINT({lon} {lat})', srid=4326)
@@ -328,6 +343,9 @@ def ejecutar_scrapeo() -> List[Dict]:
                     db.session.add(nueva_ubicacion)
                     db.session.commit()
                     ubicacion_obj = nueva_ubicacion
+                else:
+                    # Reusar la ubicación encontrada: su nombre define la clave estable
+                    nombre_lugar_normalizado = (ubicacion_obj.nombre or '').strip().lower()
 
                 # Parsear fecha y hora
                 nueva_fecha = None
@@ -347,15 +365,15 @@ def ejecutar_scrapeo() -> List[Dict]:
                     pass
 
                 # Registrar la clave vigente (artista, lugar, fecha, hora) para la sincronización
-                claves_vigentes.add(_clave_concierto(artista, nueva_fecha, nueva_hora, ubicacion_obj.id))
+                claves_vigentes.add(_clave_concierto(artista, nueva_fecha, nueva_hora, nombre_lugar_normalizado))
 
                 # Evitar duplicados: omitir si ya existe la misma clave (artista, lugar, fecha, hora)
                 try:
-                    existente = Conciertos.query.filter(
+                    existente = Conciertos.query.join(Ubicaciones, Conciertos.ubicacion == Ubicaciones.id).filter(
                         func.lower(func.trim(Conciertos.artista)) == (artista or '').strip().lower(),
                         Conciertos.fecha == nueva_fecha,
                         Conciertos.hora == nueva_hora,
-                        Conciertos.ubicacion == ubicacion_obj.id
+                        func.lower(func.trim(Ubicaciones.nombre)) == nombre_lugar_normalizado
                     ).first()
                     if existente:
                         print(f"Ya existe en la BD: '{artista}' en {nueva_fecha} {nueva_hora} — se omite")
@@ -392,8 +410,10 @@ def ejecutar_scrapeo() -> List[Dict]:
         print(f"Total de conciertos extraídos: {len(conciertos)}")
         print(f"{'='*50}")
 
-        # Mantener la base vigente: borrar pasados, duplicados y lo que ya no existe en agendade
+        # Mantener la base vigente: pasados, fuera de región, lugares duplicados, duplicados y ausentes
         eliminar_conciertos_pasados()
+        eliminar_fuera_de_amba()
+        fusionar_ubicaciones()
         eliminar_duplicados()
         if conciertos:
             eliminar_conciertos_ausentes(claves_vigentes)
@@ -482,17 +502,45 @@ def eliminar_conciertos_pasados():
         return 0
 
 
+def eliminar_fuera_de_amba():
+    try:
+        conciertos = Conciertos.query.all()
+        a_eliminar = []
+        for c in conciertos:
+            punto = None
+            if c.ubicacion_ref and c.ubicacion_ref.coordenadas:
+                try:
+                    punto = to_shape(c.ubicacion_ref.coordenadas)
+                except Exception:
+                    punto = None
+            if punto is None or not en_amba(punto.x, punto.y):
+                a_eliminar.append(c.id)
+        if not a_eliminar:
+            print("Limpieza: sin conciertos fuera del área de Buenos Aires.")
+            return 0
+        eliminados = db.session.query(Conciertos).filter(Conciertos.id.in_(a_eliminar)).delete(synchronize_session=False)
+        db.session.commit()
+        print(f"Limpieza: {eliminados} conciertos fuera del área de Buenos Aires eliminados.")
+        return eliminados
+    except Exception as e:
+        print(f"Error al eliminar conciertos fuera del área de Buenos Aires: {e}")
+        db.session.rollback()
+        return 0
+
+
 def eliminar_duplicados():
     try:
         resultado = db.session.execute(db.text(
             """
             DELETE FROM conciertos a
-            USING conciertos b
-            WHERE a.id > b.id
+            USING conciertos b, ubicaciones ua, ubicaciones ub
+            WHERE b.id < a.id
+              AND ua.id = a.ubicacion
+              AND ub.id = b.ubicacion
               AND lower(trim(a.artista)) = lower(trim(b.artista))
               AND a.fecha IS NOT DISTINCT FROM b.fecha
               AND a.hora IS NOT DISTINCT FROM b.hora
-              AND a.ubicacion IS NOT DISTINCT FROM b.ubicacion
+              AND lower(trim(ua.nombre)) = lower(trim(ub.nombre))
             """
         ))
         db.session.commit()
@@ -504,11 +552,41 @@ def eliminar_duplicados():
         return 0
 
 
-def _clave_concierto(artista, fecha, hora, ubicacion_id):
+def fusionar_ubicaciones():
+    try:
+        ubicaciones = Ubicaciones.query.all()
+        grupos = {}
+        for u in ubicaciones:
+            clave = (u.nombre or '').strip().lower()
+            if not clave:
+                continue
+            grupos.setdefault(clave, []).append(u)
+        fusionadas = 0
+        for clave, lista in grupos.items():
+            if len(lista) < 2:
+                continue
+            lista.sort(key=lambda x: x.id)
+            canonic = lista[0]
+            for dup in lista[1:]:
+                db.session.query(Conciertos).filter(Conciertos.ubicacion == dup.id).update(
+                    {Conciertos.ubicacion: canonic.id}, synchronize_session=False)
+                db.session.delete(dup)
+                fusionadas += 1
+        db.session.commit()
+        if fusionadas:
+            print(f"Limpieza: {fusionadas} lugares duplicados fusionados.")
+        return fusionadas
+    except Exception as e:
+        print(f"Error al fusionar lugares duplicados: {e}")
+        db.session.rollback()
+        return 0
+
+
+def _clave_concierto(artista, fecha, hora, lugar):
     a = (artista or '').strip().lower()
     f = '' if fecha is None else str(fecha)
     h = '' if hora is None else hora.strftime('%H:%M')
-    return f"{a}|{f}|{h}|{ubicacion_id}"
+    return f"{a}|{f}|{h}|{(lugar or '').strip().lower()}"
 
 
 def eliminar_conciertos_ausentes(claves_vigentes):
@@ -516,10 +594,10 @@ def eliminar_conciertos_ausentes(claves_vigentes):
         print("Sync: sin referencia (scrapeo sin datos), no se elimina nada.")
         return 0
     try:
-        conciertos_db = Conciertos.query.all()
+        conciertos_db = db.session.query(Conciertos, Ubicaciones).join(Ubicaciones, Conciertos.ubicacion == Ubicaciones.id).all()
         a_eliminar = [
-            c.id for c in conciertos_db
-            if _clave_concierto(c.artista, c.fecha, c.hora, c.ubicacion) not in claves_vigentes
+            c.id for c, u in conciertos_db
+            if _clave_concierto(c.artista, c.fecha, c.hora, u.nombre) not in claves_vigentes
         ]
         if not a_eliminar:
             print("Sync: todos los conciertos siguen existiendo en agendade.")
@@ -540,6 +618,8 @@ def cronjob_eliminar_conciertos():
         try:
             with app.app_context():
                 eliminar_conciertos_pasados()
+                eliminar_fuera_de_amba()
+                fusionar_ubicaciones()
                 eliminar_duplicados()
         except Exception as e:
             print(f"Error en cronjob de limpieza: {e}")
@@ -567,6 +647,8 @@ def scheduler_scraper():
 try:
     with app.app_context():
         eliminar_conciertos_pasados()
+        eliminar_fuera_de_amba()
+        fusionar_ubicaciones()
         eliminar_duplicados()
         print("Limpieza inicial completada.")
 except Exception as e:
