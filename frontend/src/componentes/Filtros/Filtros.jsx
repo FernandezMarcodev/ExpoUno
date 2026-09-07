@@ -1,8 +1,8 @@
 import styles from "./filtros.module.css";
 import React from "react";
+import { FaMapMarkerAlt, FaUser, FaSlidersH } from "react-icons/fa";
 
 function Filtros({ filtros, setFiltros, artistas }) {
-  // Activar/Desactivar ubicación actual (toggle)
   const toggleUbicacion = () => {
     if (filtros.ubicacionActual) {
       setFiltros({
@@ -20,67 +20,91 @@ function Filtros({ filtros, setFiltros, artistas }) {
             ubicacionActual: {
               lat: pos.coords.latitude,
               lng: pos.coords.longitude,
-              accuracy: pos.coords.accuracy // en metros
+              accuracy: pos.coords.accuracy
             }
           });
         },
         (err) => {
-          alert("No se pudo obtener tu ubicación");
+          alert("No se pudo obtener tu ubicacion");
           console.error(err);
         }
       );
     } else {
-      alert("Tu navegador no soporta geolocalización");
+      alert("Tu navegador no soporta geolocalizacion");
     }
   };
 
   return (
     <div className={styles.filtros}>
-      <h2>Filtrar Conciertos</h2>
+      <div className={styles.encabezadoFiltros}>
+        <FaSlidersH className={styles.iconoEncabezado} />
+        <h2 className={styles.tituloFiltros}>Explorar Conciertos</h2>
+      </div>
 
-      {/* Botón de ubicación */}
-      <button onClick={toggleUbicacion}>
-        {filtros.ubicacionActual ? "Desactivar ubicación" : "Activar ubicación"}
-      </button>
+      <div className={styles.filaFiltros}>
+        <div className={styles.grupoFiltros}>
+          <label className={styles.labelFiltro}>
+            <FaUser className={styles.iconoLabel} />
+            Artista
+          </label>
+          <select
+            className={styles.selectFiltro}
+            value={filtros.artista}
+            onChange={(e) => setFiltros({ ...filtros, artista: e.target.value })}
+          >
+            <option value="">Todos los artistas</option>
+            {artistas.sort().map((artista) => (
+              <option key={artista} value={artista}>
+                {artista}
+              </option>
+            ))}
+          </select>
+        </div>
 
-      {/* Radio de búsqueda (solo si hay ubicación) */}
-      {filtros.ubicacionActual && (
-        <>
-          <label>Radio de búsqueda (km)</label>
-          <input
-            type="range"
-            min="1"
-            max="100"
-            value={filtros.radio}
-            onChange={(e) =>
-              setFiltros({ ...filtros, radio: parseInt(e.target.value) })
-            }
-          />
-          <input
-            type="number"
-            min="1"
-            max="50"
-            value={filtros.radio}
-            onChange={(e) =>
-              setFiltros({ ...filtros, radio: parseInt(e.target.value) })
-            }
-          />
-        </>
-      )}
+        <div className={styles.grupoFiltros}>
+          <label className={styles.labelFiltro}>
+            <FaMapMarkerAlt className={styles.iconoLabel} />
+            Ubicacion
+          </label>
+          <button
+            className={`${styles.botonUbicacion} ${filtros.ubicacionActual ? styles.botonUbicacionActivo : ""}`}
+            onClick={toggleUbicacion}
+          >
+            <FaMapMarkerAlt className={styles.iconoBoton} />
+            {filtros.ubicacionActual ? "Desactivar ubicacion" : "Activar ubicacion"}
+          </button>
+        </div>
 
-      {/* Filtro por artista */}
-      <label>Seleccionar Artista</label>
-      <select
-        value={filtros.artista}
-        onChange={(e) => setFiltros({ ...filtros, artista: e.target.value })}
-      >
-        <option value="">Todos los artistas</option>
-        {artistas.sort().map((artista) => (
-          <option key={artista} value={artista}>
-            {artista}
-          </option>
-        ))}
-      </select>
+        {filtros.ubicacionActual && (
+          <div className={styles.grupoFiltros}>
+            <label className={styles.labelFiltro}>
+              Radio: {filtros.radio} km
+            </label>
+            <div className={styles.filaRadio}>
+              <input
+                type="range"
+                className={styles.sliderRadio}
+                min="1"
+                max="100"
+                value={filtros.radio}
+                onChange={(e) =>
+                  setFiltros({ ...filtros, radio: parseInt(e.target.value) })
+                }
+              />
+              <input
+                type="number"
+                className={styles.inputNumero}
+                min="1"
+                max="100"
+                value={filtros.radio}
+                onChange={(e) =>
+                  setFiltros({ ...filtros, radio: parseInt(e.target.value) })
+                }
+              />
+            </div>
+          </div>
+        )}
+      </div>
     </div>
   );
 }

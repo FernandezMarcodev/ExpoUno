@@ -1,6 +1,6 @@
 import styles from "./encabezado.module.css";
 import { useState, useEffect } from "react";
-import IconoContraste from "../Iconos/Contraste";
+import { FaSun, FaMoon } from "react-icons/fa";
 
 function Encabezado() {
   const [modoOscuro, setModoOscuro] = useState(false);
@@ -14,7 +14,6 @@ function Encabezado() {
   }, []);
 
   function cambiarTema() {
-    console.log('toggle tema, antes:', modoOscuro)
     if (modoOscuro) {
       document.documentElement.classList.remove("dark");
       localStorage.setItem("tema", "claro");
@@ -28,14 +27,21 @@ function Encabezado() {
 
   return (
     <header className={styles.encabezado}>
-      <h1>Conciertos Finder</h1>
-      <button 
-      className={styles.botonIcono} 
-      onClick={cambiarTema}
-      aria-label={modoOscuro ? "Cambiar a modo claro" : "Cambiar a modo oscuro"}
-      title={modoOscuro ? "Cambiar a modo claro" : "Cambiar a modo oscuro"}
+      <div className={styles.marca}>
+        <img src="/logo.png" alt="" className={styles.logoMarca} aria-hidden="true" />
+        <h1 className={styles.tituloMarca}>Concierto Finder</h1>
+      </div>
+      <button
+        className={styles.temaToggle}
+        onClick={cambiarTema}
+        aria-label={modoOscuro ? "Cambiar a modo claro" : "Cambiar a modo oscuro"}
+        title={modoOscuro ? "Cambiar a modo claro" : "Cambiar a modo oscuro"}
       >
-        <IconoContraste className={styles.iconoContraste} />
+        {modoOscuro ? (
+          <FaSun className={styles.iconoTema} />
+        ) : (
+          <FaMoon className={styles.iconoTema} />
+        )}
       </button>
     </header>
   );
