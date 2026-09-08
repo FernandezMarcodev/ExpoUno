@@ -1,39 +1,54 @@
+/* ====== PIE DE PAGINA ====== */
 .pie-de-pagina {
-    background-color: #1a1a1a;
-    color: #fff;
-    padding: 30px 20px;
+    background-color: var(--color-surface);
+    border-top: 1px solid var(--color-border);
+    color: var(--color-text);
+    padding: var(--space-8) var(--space-5);
     text-align: center;
-    font-family: 'Arial', sans-serif;
+    font-family: var(--font-sans);
+    margin-top: auto;
 }
 
 .pie-contenedor {
     display: flex;
     flex-direction: column;
     align-items: center;
-    gap: 15px;
+    gap: var(--space-4);
 }
 
 .pie-enlaces {
     display: flex;
-    gap: 25px;
-    font-size: 1.1rem;
+    gap: var(--space-6);
+    font-size: var(--text-sm);
 }
 
 .pie-enlaces a {
-    color: #ffffff; /* dorado */
+    color: var(--color-text-secondary);
     text-decoration: none;
     display: flex;
     align-items: center;
-    gap: 8px;
-    transition: color 0.3s;
+    gap: 6px;
+    transition: color var(--transition-base);
 }
 
 .pie-enlaces a:hover {
-    color: #7380c9;
+    color: var(--color-accent);
+    text-decoration: none;
 }
 
 .pie-copy {
-    margin-top: 20px;
-    font-size: 0.9rem;
-    color: #aaa;
+    margin: 0;
+    font-size: var(--text-xs);
+    color: var(--color-text-tertiary);
+}
+
+/* ====== RESPONSIVE ====== */
+@media (max-width: 480px) {
+    .pie-de-pagina {
+        padding: var(--space-6) var(--space-4);
+    }
+
+    .pie-enlaces {
+        gap: var(--space-4);
+    }
 }

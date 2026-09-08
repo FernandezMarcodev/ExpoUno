@@ -9,8 +9,8 @@ import { conciertoServicio } from '../servicios/conciertoServicio';
 
 const Inicio = () => {
   const [conciertoSeleccionado, setConciertoSeleccionado] = useState(null);
-  const [conciertosBase, setConciertosBase] = useState([]); // Todos los conciertos sin filtrar
-  const [conciertos, setConciertos] = useState([]); // Conciertos filtrados que se muestran
+  const [conciertosBase, setConciertosBase] = useState([]);
+  const [conciertos, setConciertos] = useState([]);
   const [cargando, setCargando] = useState(true);
   const [error, setError] = useState(null);
   const [centroMapa, setCentroMapa] = useState(null);
@@ -20,7 +20,6 @@ const Inicio = () => {
     ubicacionActual: null
   });
 
-  // 🧠 Obtener lista única de artistas para el select
   const artistas = useMemo(() => {
     return [...new Set(
       conciertosBase
@@ -29,10 +28,9 @@ const Inicio = () => {
     )].sort();
   }, [conciertosBase]);
 
-  // 📍 Calcular distancia entre dos coordenadas (Haversine)
   const distanciaKm = (lat1, lon1, lat2, lon2) => {
     const toRad = (v) => (v * Math.PI) / 180;
-    const R = 6371; // Radio de la Tierra en km
+    const R = 6371;
     const dLat = toRad(lat2 - lat1);
     const dLon = toRad(lon2 - lon1);
     const a =
@@ -43,7 +41,6 @@ const Inicio = () => {
     return R * c;
   };
 
-  // 🎯 Mostrar concierto en mapa
   const verEnMapa = (concierto) => {
     if (concierto.ubicacion_detalle?.coordenadas) {
       setCentroMapa({
@@ -52,14 +49,13 @@ const Inicio = () => {
         zoom: 15
       });
       setConciertoSeleccionado(concierto);
-      document.querySelector('.contenedor-mapa')?.scrollIntoView({
+      document.getElementById('zona-mapa')?.scrollIntoView({
         behavior: 'smooth',
         block: 'center'
       });
     }
   };
 
-  // 🧩 Cargar todos los conciertos una sola vez (sin filtros)
   useEffect(() => {
     let activo = true;
 
@@ -71,7 +67,7 @@ const Inicio = () => {
 
         if (activo) {
           setConciertosBase(datos);
-          setConciertos(datos); // Mostrar todos inicialmente
+          setConciertos(datos);
         }
       } catch (err) {
         if (activo) {
@@ -88,19 +84,16 @@ const Inicio = () => {
     return () => { activo = false; };
   }, []);
 
-  // 🎚️ Aplicar filtros (artista + ubicación + radio)
   useEffect(() => {
     if (!conciertosBase || conciertosBase.length === 0) return;
 
     const timeout = setTimeout(() => {
       const filtrados = conciertosBase.filter(c => {
-        // 🎵 Filtro por artista
         const pasaArtista = filtros.artista
           ? c.artista?.toLowerCase().includes(filtros.artista.toLowerCase())
           : true;
         if (!pasaArtista) return false;
 
-        // 📍 Filtro por ubicación
         if (filtros.ubicacionActual && c.ubicacion_detalle?.coordenadas) {
           const lat = c.ubicacion_detalle.coordenadas[1];
           const lng = c.ubicacion_detalle.coordenadas[0];
@@ -117,7 +110,7 @@ const Inicio = () => {
       });
 
       setConciertos(filtrados);
-    }, 300); // ⏱️ debounce: evita recalcular demasiado rápido
+    }, 300);
 
     return () => clearTimeout(timeout);
   }, [filtros, conciertosBase]);
@@ -126,27 +119,23 @@ const Inicio = () => {
     <div className="pagina-inicio">
       <Encabezado />
 
-      <div className="fondo-patron"></div>
+      <main className="contenedor-principal">
+        <section className="titulo-section">
+          <img src="/logo.png" alt="Concierto Finder" className="logo-principal" />
+          <h2 className="titulo-principal">
+            Conciertos Disponibles
+            {!cargando && conciertos.length > 0 && (
+              <span className="contador-conciertos">{conciertos.length}</span>
+            )}
+          </h2>
+          <p className="descripcion-principal">
+            Explora los proximos conciertos en Buenos Aires y alrededores
+          </p>
+        </section>
 
-      <div className="contenedor-principal">
-        <div className="titulo-wrapper">
-          <h1 className="titulo-principal">Conciertos Disponibles</h1>
-          {!cargando && conciertos.length > 0 && (
-            <span className="contador-conciertos">{conciertos.length}</span>
-          )}
-        </div>
-
-        <img src="/logo.png" alt="Concierto Finder Logo" className="logo-principal" />
-
-        <p className="descripcion-principal">
-          Explora los próximos conciertos en Buenos Aires y alrededores
-        </p>
-
-        {/* 🧭 Filtros de búsqueda */}
         <Filtros filtros={filtros} setFiltros={setFiltros} artistas={artistas} />
 
-        <div className="contenedor-grid">
-          {/* 🗺️ Columna del mapa */}
+        <div className="contenedor-grid" id="zona-mapa">
           <div className="col-mapa">
             {error ? (
               <EstadoVacio tipo="error" />
@@ -156,7 +145,7 @@ const Inicio = () => {
                   centroMapa ||
                   (filtros.ubicacionActual
                     ? [filtros.ubicacionActual.lat, filtros.ubicacionActual.lng]
-                    : [-34.6037, -58.3816]) // Centro por defecto (BsAs)
+                    : [-34.6037, -58.3816])
                 }
                 zoom={centroMapa?.zoom}
                 conciertos={conciertos}
@@ -167,7 +156,6 @@ const Inicio = () => {
             )}
           </div>
 
-          {/* 🎟️ Columna con lista de conciertos */}
           <div className="col-lista">
             {error ? (
               <EstadoVacio tipo="error" />
@@ -185,7 +173,7 @@ const Inicio = () => {
             )}
           </div>
         </div>
-      </div>
+      </main>
 
       <PieDePagina />
     </div>

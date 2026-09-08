@@ -7,15 +7,15 @@ const PieDePagina = () => {
         <footer className="pie-de-pagina">
             <div className="pie-contenedor">
                 <div className="pie-enlaces">
-                    <a 
-                        href="https://github.com/FernandezMarcodev/ExpoUno" 
-                        target="_blank" 
+                    <a
+                        href="https://github.com/FernandezMarcodev/ExpoUno"
+                        target="_blank"
                         rel="noopener noreferrer"
                     >
-                        <FaGithub size={20} /> GitHub
+                        <FaGithub size={18} /> GitHub
                     </a>
                     <a href="mailto:BombaServices@gmail.com">
-                        <FaEnvelope size={20} /> Contacto
+                        <FaEnvelope size={18} /> Contacto
                     </a>
                 </div>
             </div>

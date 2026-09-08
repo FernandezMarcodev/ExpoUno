@@ -1,30 +1,39 @@
 import React from "react";
 import styles from "./estadoVacio.module.css";
+import { FaSearch, FaExclamationTriangle } from "react-icons/fa";
 
 const EstadoVacio = ({ tipo = "sin-resultados" }) => {
-  // Configuración de mensajes según el tipo
   const configs = {
     "sin-resultados": {
       titulo: "No hay conciertos",
       descripcion:
-        "No se encontraron conciertos con los filtros seleccionados. Intenta ajustar tu búsqueda.",
+        "No se encontraron conciertos con los filtros seleccionados. Intenta ajustar tu busqueda.",
+      icono: <FaSearch className={styles.iconoEstado} />,
     },
     error: {
       titulo: "Error al cargar",
       descripcion:
         "Hubo un problema al cargar los conciertos. Por favor, intenta nuevamente.",
+      icono: <FaExclamationTriangle className={styles.iconoEstado} />,
     },
   };
 
-  // Elegimos la configuración según el tipo
   const config = configs[tipo] || configs["sin-resultados"];
 
   return (
     <div className={styles.estadoVacio}>
-      <h3>{config.titulo}</h3>
-      <p>{config.descripcion}</p>
+      <div className={styles.iconoWrapper}>
+        {config.icono}
+      </div>
+      <h3 className={styles.titulo}>{config.titulo}</h3>
+      <p className={styles.descripcion}>{config.descripcion}</p>
       {tipo === "error" && (
-        <button onClick={() => window.location.reload()}>Reintentar</button>
+        <button
+          className={styles.botonReintentar}
+          onClick={() => window.location.reload()}
+        >
+          Reintentar
+        </button>
       )}
     </div>
   );
