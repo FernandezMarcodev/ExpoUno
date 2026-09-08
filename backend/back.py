@@ -666,7 +666,7 @@ def cronjob_eliminar_conciertos():
 
 # Scraper automático: ejecuta el scrapeo cada SCRAPER_INTERVALO_MINUTOS (0 = desactivado)
 def scheduler_scraper():
-    interval_minutos = int(os.getenv("SCRAPER_INTERVALO_MINUTOS", "2880"))
+    interval_minutos = int(os.getenv("SCRAPER_INTERVALO_MINUTOS", "720"))
     if interval_minutos <= 0:
         print("Scraper automático desactivado (SCRAPER_INTERVALO_MINUTOS=0).")
         return
