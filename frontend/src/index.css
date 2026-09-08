@@ -232,6 +232,7 @@ html.dark .logo-principal {
 .col-mapa {
   width: 100%;
   min-width: 0;
+  scroll-margin-top: 76px;
 }
 
 .col-lista {

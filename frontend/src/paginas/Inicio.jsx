@@ -49,7 +49,7 @@ const Inicio = () => {
         zoom: 15
       });
       setConciertoSeleccionado(concierto);
-      document.getElementById('zona-mapa')?.scrollIntoView({
+      document.getElementById('col-mapa')?.scrollIntoView({
         behavior: 'smooth',
         block: 'center'
       });
@@ -136,7 +136,7 @@ const Inicio = () => {
         <Filtros filtros={filtros} setFiltros={setFiltros} artistas={artistas} />
 
         <div className="contenedor-grid" id="zona-mapa">
-          <div className="col-mapa">
+          <div className="col-mapa" id="col-mapa">
             {error ? (
               <EstadoVacio tipo="error" />
             ) : (
