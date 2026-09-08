@@ -113,6 +113,10 @@ def hello_world():
     print("Api funcionando correctamente: 200 OK")
     return "<p>Api funcionando correctamente: 200 OK</p>"
 
+@app.route("/health")
+def health_check():
+    return jsonify({"status": "ok", "service": "concierto-finder-backend"}), 200
+
 @app.route("/ubicaciones")
 def get_ubicaciones():
     print("hola")
