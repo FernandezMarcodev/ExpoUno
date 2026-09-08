@@ -1,8 +1,19 @@
-import React, { useEffect, useMemo, useRef } from "react";
+import React, { useEffect, useMemo, useRef, useState } from "react";
 import { MapContainer, TileLayer, ZoomControl, Marker, Popup, useMap, Circle, CircleMarker } from "react-leaflet";
+import { FiMoon, FiRefreshCw, FiSun } from "react-icons/fi";
 import L from "leaflet";
 import "leaflet/dist/leaflet.css";
 import styles from "./mapa.module.css";
+
+const CLAVE_ESTILO_MAPA = "mapaEstilo";
+
+const leerEstiloMapa = () => {
+  try {
+    const guardado = localStorage.getItem(CLAVE_ESTILO_MAPA);
+    if (guardado === "claro" || guardado === "oscuro") return guardado;
+  } catch { /* sin almacenamiento */ }
+  return "auto";
+};
 
 delete L.Icon.Default.prototype._getIconUrl;
 L.Icon.Default.mergeOptions({
@@ -67,7 +78,55 @@ const ARG_MAX_BOUNDS = [[-55.05, -73.6], [-21.7, -53.6]];
 const enAmba = (lat, lng) =>
   lat >= AMBA_MIN_LAT && lat <= AMBA_MAX_LAT && lng >= AMBA_MIN_LNG && lng <= AMBA_MAX_LNG;
 
+const SelectorEstiloMapa = ({ valor, alCambiar }) => {
+  const opciones = [
+    { estilo: "auto", icono: <FiRefreshCw />, etiqueta: "Automático (según tema)" },
+    { estilo: "claro", icono: <FiSun />, etiqueta: "Mapa claro" },
+    { estilo: "oscuro", icono: <FiMoon />, etiqueta: "Mapa oscuro" },
+  ];
+
+  return (
+    <div className={styles.selectorEstilo}>
+      {opciones.map(opcion => (
+        <button
+          key={opcion.estilo}
+          type="button"
+          onClick={() => alCambiar(opcion.estilo)}
+          aria-pressed={valor === opcion.estilo}
+          aria-label={opcion.etiqueta}
+          title={opcion.etiqueta}
+          className={`${styles.selectorBoton} ${valor === opcion.estilo ? styles.selectorBotonActivo : ""}`}
+        >
+          {opcion.icono}
+        </button>
+      ))}
+    </div>
+  );
+};
+
 function Mapa({ centro, zoom, conciertos = [], ubicacionUsuario, radioKm, seleccionadoId }) {
+  const [modoOscuro, setModoOscuro] = useState(
+    () => localStorage.getItem("tema") === "oscuro"
+  );
+
+  useEffect(() => {
+    const observer = new MutationObserver(() => {
+      setModoOscuro(document.documentElement.classList.contains("dark"));
+    });
+    observer.observe(document.documentElement, { attributes: true, attributeFilter: ["class"] });
+    return () => observer.disconnect();
+  }, []);
+
+  const [estiloMapa, setEstiloMapa] = useState(leerEstiloMapa);
+  const usarOscuro = estiloMapa === "oscuro" || (estiloMapa === "auto" && modoOscuro);
+
+  const cambiarEstilo = (estilo) => {
+    setEstiloMapa(estilo);
+    try {
+      localStorage.setItem(CLAVE_ESTILO_MAPA, estilo);
+    } catch { /* sin almacenamiento */ }
+  };
+
   const centroInicial = centro || [-34.6037, -58.3816];
 
   // Agrupar conciertos por ubicación exacta
@@ -114,7 +173,7 @@ function Mapa({ centro, zoom, conciertos = [], ubicacionUsuario, radioKm, selecc
   };
 
   return (
-    <div className={styles.contenedorMapa}>
+    <div className={`${styles.contenedorMapa} ${usarOscuro ? styles.tilesOscuro : ""}`}>
       <MapContainer
         center={centroInicial}
         zoom={zoom || 11}
@@ -126,7 +185,7 @@ function Mapa({ centro, zoom, conciertos = [], ubicacionUsuario, radioKm, selecc
       >
         <CambiarVistaMapa centro={centro} zoom={zoom} />
         <TileLayer
-          attribution='&copy; OpenStreetMap'
+          attribution='&copy; <a href="https://www.openstreetmap.org/copyright">OpenStreetMap</a> contributors'
           url="https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png"
         />
         <ZoomControl position="bottomright" />
@@ -217,6 +276,7 @@ function Mapa({ centro, zoom, conciertos = [], ubicacionUsuario, radioKm, selecc
 
         <ControlarPopupSeleccion seleccionadoId={seleccionadoId} />
       </MapContainer>
+      <SelectorEstiloMapa valor={estiloMapa} alCambiar={cambiarEstilo} />
     </div>
   );
 }
