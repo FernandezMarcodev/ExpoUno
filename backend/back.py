@@ -440,6 +440,12 @@ def ejecutar_scrapeo() -> List[Dict]:
 def scrape_conciertos() -> List[Dict]:
     return ejecutar_scrapeo()
 
+
+@app.route("/limpiar_conciertos_pasados")
+def limpiar_conciertos_pasados():
+    eliminados = eliminar_conciertos_pasados()
+    return jsonify({"eliminados": eliminados, "mensaje": f"{eliminados} conciertos pasados eliminados"})
+
 def get_coordenadas(location_name):
     """
     Obtiene las coordenadas usando Nominatim de OpenStreetMap (gratuito).
