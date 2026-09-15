@@ -1,15 +1,18 @@
 import styles from "./tarjetaConcierto.module.css";
 import React from "react";
-import { FaUser, FaMapMarkerAlt, FaCalendar, FaClock, FaTicketAlt, FaDirections, FaMapPin, FaChild, FaHeart, FaRegHeart } from "react-icons/fa";
+import { FaUser, FaMapMarkerAlt, FaCalendar, FaClock, FaTicketAlt, FaDirections, FaMapPin, FaChild, FaHeart, FaRegHeart, FaBell, FaRegBell } from "react-icons/fa";
 import { useNavigate } from "react-router-dom";
 import { useAuth } from "../../contextos/AuthContext";
 import { useFavoritos } from "../../contextos/FavoritosContext";
+import { useSeguidos } from "../../contextos/SeguidosContext";
 
 const TarjetaConcierto = ({ concierto, seleccionado, onVerEnMapa }) => {
   const navigate = useNavigate();
   const { autenticado } = useAuth();
   const { esFavorito, alternarFavorito } = useFavoritos();
+  const { esSeguido, alternarSeguido } = useSeguidos();
   const favorito = esFavorito(concierto.id);
+  const siguiendo = esSeguido(concierto.artista);
 
   const alternar = async () => {
     if (!autenticado) {
@@ -17,6 +20,14 @@ const TarjetaConcierto = ({ concierto, seleccionado, onVerEnMapa }) => {
       return;
     }
     await alternarFavorito(concierto);
+  };
+
+  const seguir = async () => {
+    if (!autenticado) {
+      navigate("/login");
+      return;
+    }
+    await alternarSeguido(concierto.artista);
   };
 
   return (
@@ -72,6 +83,17 @@ const TarjetaConcierto = ({ concierto, seleccionado, onVerEnMapa }) => {
       </div>
 
       <div className={styles.acciones}>
+        <button
+          className={`${styles.botonSeguir} ${siguiendo ? styles.siguiendoActivo : ""}`}
+          onClick={seguir}
+        >
+          {siguiendo ? (
+            <FaBell className={styles.iconoAccion} />
+          ) : (
+            <FaRegBell className={styles.iconoAccion} />
+          )}
+          {siguiendo ? "Siguiendo" : "Seguir artista"}
+        </button>
         <button
           className={styles.botonMapa}
           onClick={() => onVerEnMapa(concierto)}

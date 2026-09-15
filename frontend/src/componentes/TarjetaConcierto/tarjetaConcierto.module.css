@@ -194,6 +194,25 @@
   border-color: var(--color-text-tertiary);
 }
 
+/* Boton "Seguir artista" */
+.botonSeguir {
+  border: 1px solid var(--color-border);
+  background-color: var(--color-surface);
+  color: var(--color-text);
+}
+
+.botonSeguir:hover {
+  background-color: var(--color-bg-subtle);
+  border-color: var(--color-accent);
+  color: var(--color-accent);
+}
+
+.siguiendoActivo {
+  border-color: var(--color-accent);
+  background-color: var(--color-accent-light);
+  color: var(--color-accent);
+}
+
 /* Enlace "Como llegar" */
 .enlaceSecundario {
   border: 1px solid var(--color-border);
