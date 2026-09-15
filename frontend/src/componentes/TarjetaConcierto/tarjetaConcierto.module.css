@@ -31,6 +31,52 @@
   margin-bottom: var(--space-3);
 }
 
+.cabeceraDerecha {
+  display: flex;
+  align-items: center;
+  gap: var(--space-2);
+  flex-shrink: 0;
+}
+
+.botonFavorito {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 32px;
+  height: 32px;
+  padding: 0;
+  border-radius: var(--radius-full);
+  border: 1px solid var(--color-border);
+  background-color: var(--color-surface);
+  color: var(--color-text-tertiary);
+  cursor: pointer;
+  transition: background-color var(--transition-base),
+              border-color var(--transition-base),
+              color var(--transition-base),
+              transform var(--transition-fast);
+}
+
+.botonFavorito:hover {
+  border-color: var(--color-error);
+  color: var(--color-error);
+  background-color: var(--color-error-light);
+}
+
+.botonFavorito:active {
+  transform: scale(0.9);
+}
+
+.favoritoActivo {
+  border-color: var(--color-error);
+  background-color: var(--color-error-light);
+  color: var(--color-error);
+}
+
+.iconoCorazon {
+  width: 16px;
+  height: 16px;
+}
+
 .nombre {
   margin: 0;
   font-size: var(--text-lg);
@@ -146,6 +192,25 @@
 .botonMapa:hover {
   background-color: var(--color-bg-subtle);
   border-color: var(--color-text-tertiary);
+}
+
+/* Boton "Seguir artista" */
+.botonSeguir {
+  border: 1px solid var(--color-border);
+  background-color: var(--color-surface);
+  color: var(--color-text);
+}
+
+.botonSeguir:hover {
+  background-color: var(--color-bg-subtle);
+  border-color: var(--color-accent);
+  color: var(--color-accent);
+}
+
+.siguiendoActivo {
+  border-color: var(--color-accent);
+  background-color: var(--color-accent-light);
+  color: var(--color-accent);
 }
 
 /* Enlace "Como llegar" */

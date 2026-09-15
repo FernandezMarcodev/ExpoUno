@@ -1,31 +1,46 @@
-from flask import Flask
+from flask import Flask, request, jsonify, g
 from flask_sqlalchemy import SQLAlchemy
 from geoalchemy2 import Geometry, WKTElement
 from sqlalchemy.dialects.postgresql import BOOLEAN, DATE, TIME
 from geoalchemy2.shape import to_shape
 from sqlalchemy import func, and_
-from flask import request
 from markupsafe import escape
 import requests
 from bs4 import BeautifulSoup
 import time
-from typing import List, Dict
+from typing import List, Dict, Optional
 import json
-from datetime import datetime, date
+from datetime import datetime, date, timedelta, timezone
 import threading
 from flask_cors import CORS
-from sqlalchemy.exc import TimeoutError
-from flask import jsonify
+from sqlalchemy.exc import TimeoutError, IntegrityError
 from sqlalchemy.orm import joinedload
 import os
 from urllib.parse import quote_plus
 from dotenv import load_dotenv
+from functools import wraps
+import bcrypt
+import jwt as pyjwt
+from pywebpush import webpush, WebPushException
 
 import sys
 sys.stdout.reconfigure(line_buffering=True)
 sys.stderr.reconfigure(line_buffering=True)
 
 load_dotenv()
+
+# Autenticación por token JWT (HS256). El secreto se configura en el .env.
+JWT_SECRET = os.getenv("JWT_SECRET", "")
+JWT_EXPIRACION_HORAS = int(os.getenv("JWT_EXPIRACION_HORAS", "24"))
+# Claves Web Push (VAPID) para notificaciones push del navegador. Se generan con
+# backend/generar_vapid.py. Si no están configuradas, el push simplemente se omite.
+VAPID_PUBLIC_KEY = os.getenv("VAPID_PUBLIC_KEY", "")
+VAPID_PRIVATE_KEY = os.getenv("VAPID_PRIVATE_KEY", "")
+VAPID_SUBJECT = os.getenv("VAPID_SUBJECT", "")
+
+# Hash bcrypt fijo para igualar el tiempo de respuesta del login cuando el email
+# no existe (evita enumerar cuentas por diferencia de latencia).
+HASH_DUMMY = "$2b$12$HQfoH4HqNYj685Wa9.gVC.KgPIq4DXVGONzq8rIz3oSAtQv9i2dNu"
 
 app = Flask(__name__)
 CORS(app)
@@ -88,6 +103,49 @@ class Conciertos(db.Model):
     # Cantidad de scrapeos completos consecutivos en los que el concierto no apareció.
     # El sync de "ausentes" solo borra cuando misses >= 2 (borrado diferido).
     misses = db.Column(db.Integer, nullable=False, default=0)
+    # Momento en que se insertó el concierto: la base para registrar "novedades"
+    # (conciertos nuevos de artistas seguidos) tras cada scrape completo.
+    creado_en = db.Column(db.DateTime(timezone=True), server_default=db.func.now())
+
+class Usuarios(db.Model):
+    __tablename__ = 'usuarios'
+    id = db.Column(db.Integer, primary_key=True)
+    email = db.Column(db.Text, nullable=False, unique=True)
+    nombre = db.Column(db.Text, nullable=False)
+    password_hash = db.Column(db.Text, nullable=False)
+    creado_en = db.Column(db.DateTime(timezone=True), server_default=db.func.now())
+
+class Favoritos(db.Model):
+    __tablename__ = 'favoritos'
+    usuario_id = db.Column(db.Integer, db.ForeignKey('usuarios.id', ondelete='CASCADE'), primary_key=True)
+    concierto_id = db.Column(db.Integer, db.ForeignKey('conciertos.id', ondelete='CASCADE'), primary_key=True)
+    creado_en = db.Column(db.DateTime(timezone=True), server_default=db.func.now())
+
+class Seguidos(db.Model):
+    __tablename__ = 'seguidos'
+    id = db.Column(db.Integer, primary_key=True)
+    usuario_id = db.Column(db.Integer, db.ForeignKey('usuarios.id', ondelete='CASCADE'), nullable=False)
+    artista = db.Column(db.Text, nullable=False)
+    creado_en = db.Column(db.DateTime(timezone=True), server_default=db.func.now())
+    __table_args__ = (db.UniqueConstraint('usuario_id', 'artista', name='uq_seguidos_usuario_artista'),)
+
+class Notificaciones(db.Model):
+    __tablename__ = 'notificaciones'
+    id = db.Column(db.Integer, primary_key=True)
+    usuario_id = db.Column(db.Integer, db.ForeignKey('usuarios.id', ondelete='CASCADE'), nullable=False)
+    concierto_id = db.Column(db.Integer, db.ForeignKey('conciertos.id', ondelete='CASCADE'), nullable=False)
+    leida = db.Column(db.Boolean, nullable=False, default=False, server_default=db.text("false"))
+    creado_en = db.Column(db.DateTime(timezone=True), server_default=db.func.now())
+    __table_args__ = (db.UniqueConstraint('usuario_id', 'concierto_id', name='uq_notificaciones_usuario_concierto'),)
+
+class SuscripcionesPush(db.Model):
+    __tablename__ = 'suscripciones_push'
+    id = db.Column(db.Integer, primary_key=True)
+    usuario_id = db.Column(db.Integer, db.ForeignKey('usuarios.id', ondelete='CASCADE'), nullable=False)
+    endpoint = db.Column(db.Text, unique=True, nullable=False)
+    clave_publica = db.Column(db.Text, nullable=False)
+    autenticacion = db.Column(db.Text, nullable=False)
+    creado_en = db.Column(db.DateTime(timezone=True), server_default=db.func.now())
 
 # Región: solo Buenos Aires y alrededores (CABA + GBA + La Plata/Cañuelas).
 AMBA_MIN_LAT = -35.15
@@ -113,15 +171,37 @@ with app.app_context():
     except Exception as e:
         print(f"AVISO: no se pudieron crear/verificar las tablas: {e}")
         db.session.rollback()
-    try:
-        # db.create_all() no altera tablas existentes: se agrega la columna
-        # de borrado diferido ("misses") si la instancia ya tiene la tabla.
-        db.session.execute(db.text("ALTER TABLE conciertos ADD COLUMN IF NOT EXISTS misses INTEGER NOT NULL DEFAULT 0"))
-        db.session.commit()
-        print("Columna 'misses' verificada/creada.")
-    except Exception as e:
-        print(f"AVISO: no se pudo verificar la columna 'misses': {e}")
-        db.session.rollback()
+    if os.getenv("SKIP_MANTENIMIENTO_INICIAL") != "1":
+        # Con SKIP_MANTENIMIENTO_INICIAL=1 se saltea el DDL y la limpieza que
+        # toma locks sobre tablas existentes (útil para tests contra BD en uso).
+        try:
+            # db.create_all() no altera tablas existentes: se agrega la columna
+            # de borrado diferido ("misses") si la instancia ya tiene la tabla.
+            db.session.execute(db.text("ALTER TABLE conciertos ADD COLUMN IF NOT EXISTS misses INTEGER NOT NULL DEFAULT 0"))
+            db.session.commit()
+            print("Columna 'misses' verificada/creada.")
+        except Exception as e:
+            print(f"AVISO: no se pudo verificar la columna 'misses': {e}")
+            db.session.rollback()
+        try:
+            # Marca de tiempo de inserción del concierto: clave para detectar
+            # conciertos nuevos tras un scrape (novedades de artistas seguidos).
+            db.session.execute(db.text("ALTER TABLE conciertos ADD COLUMN IF NOT EXISTS creado_en TIMESTAMPTZ NOT NULL DEFAULT now()"))
+            db.session.commit()
+            print("Columna 'creado_en' verificada/creada.")
+        except Exception as e:
+            print(f"AVISO: no se pudo verificar la columna 'creado_en': {e}")
+            db.session.rollback()
+        try:
+            # Asegura default de las nuevas columnas ya existentes y acelera el
+            # match normalizado de artistas (seguidos/novedades).
+            db.session.execute(db.text("ALTER TABLE notificaciones ALTER COLUMN leida SET DEFAULT false"))
+            db.session.execute(db.text("CREATE INDEX IF NOT EXISTS idx_conciertos_artista_lower ON conciertos (lower(btrim(artista)))"))
+            db.session.commit()
+            print("Índice de artistas verificada/creado.")
+        except Exception as e:
+            print(f"AVISO: no se pudo verificar el índice de artistas: {e}")
+            db.session.rollback()
 
 #rutas
 @app.route("/")
@@ -152,33 +232,37 @@ def get_ubicaciones():
         ]
     }
 
+# Serialización compartida de un concierto (mismo shape en /conciertos,
+# /conciertos_cerca, /favoritos y /novedades).
+def serializar_concierto(concierto):
+    return {
+        "id": concierto.id,
+        "nombre": concierto.nombre,
+        "artista": concierto.artista,
+        "url_evento": concierto.url_evento,
+        "ubicacion": concierto.ubicacion,
+        "isAgotado": concierto.isagotado,
+        "isAptoMenores": concierto.isaptomenores,
+        "fecha": str(concierto.fecha) if concierto.fecha else None,
+        "hora": str(concierto.hora) if concierto.hora else None,
+        "ubicacion_detalle": {
+            "id": concierto.ubicacion_ref.id if concierto.ubicacion_ref else None,
+            "nombre": concierto.ubicacion_ref.nombre if concierto.ubicacion_ref else None,
+            "capacidad_total": concierto.ubicacion_ref.capacidad_total if concierto.ubicacion_ref else None,
+            "coordenadas": (
+                [to_shape(concierto.ubicacion_ref.coordenadas).x, to_shape(concierto.ubicacion_ref.coordenadas).y]
+                if concierto.ubicacion_ref and concierto.ubicacion_ref.coordenadas else None
+            ),
+            "url_maps": concierto.ubicacion_ref.url_maps if concierto.ubicacion_ref else None
+        }
+    }
+
+
 @app.route("/conciertos")
 def get_conciertos():
     conciertos = Conciertos.query.all()
     return {
-        "conciertos": [
-            {
-                "id": concierto.id,
-                "nombre": concierto.nombre,
-                "artista": concierto.artista,
-                "url_evento": concierto.url_evento,
-                "ubicacion": concierto.ubicacion,
-                "isAgotado": concierto.isagotado,
-                "isAptoMenores": concierto.isaptomenores,
-                "fecha": str(concierto.fecha),
-                "hora": str(concierto.hora),
-                "ubicacion_detalle": {
-                    "id": concierto.ubicacion_ref.id if concierto.ubicacion_ref else None,
-                    "nombre": concierto.ubicacion_ref.nombre if concierto.ubicacion_ref else None,
-                    "capacidad_total": concierto.ubicacion_ref.capacidad_total if concierto.ubicacion_ref else None,
-                    "coordenadas": (
-                        [to_shape(concierto.ubicacion_ref.coordenadas).x, to_shape(concierto.ubicacion_ref.coordenadas).y]
-                        if concierto.ubicacion_ref and concierto.ubicacion_ref.coordenadas else None
-                    ),
-                    "url_maps": concierto.ubicacion_ref.url_maps if concierto.ubicacion_ref else None
-                }
-            } for concierto in conciertos
-        ]
+        "conciertos": [serializar_concierto(c) for c in conciertos]
     }
 
 #ejemplo query desde parque rivadavia /conciertos_cerca?lng=-34.61830362159788&lat=-58.433900393162745&km=10
@@ -211,29 +295,7 @@ def get_conciertos_cerca():
 
         # Serializar DENTRO del try, mientras la sesión está activa
         resultado = {
-            "conciertos": [
-                {
-                    "id": concierto.id,
-                    "nombre": concierto.nombre,
-                    "artista": concierto.artista,
-                    "url_evento": concierto.url_evento,
-                    "ubicacion": concierto.ubicacion,
-                    "isAgotado": concierto.isagotado,
-                    "isAptoMenores": concierto.isaptomenores,
-                    "fecha": str(concierto.fecha),
-                    "hora": str(concierto.hora),
-                    "ubicacion_detalle": {
-                        "id": concierto.ubicacion_ref.id if concierto.ubicacion_ref else None,
-                        "nombre": concierto.ubicacion_ref.nombre if concierto.ubicacion_ref else None,
-                        "capacidad_total": concierto.ubicacion_ref.capacidad_total if concierto.ubicacion_ref else None,
-                        "coordenadas": (
-                            [to_shape(concierto.ubicacion_ref.coordenadas).x, to_shape(concierto.ubicacion_ref.coordenadas).y]
-                            if concierto.ubicacion_ref and concierto.ubicacion_ref.coordenadas else None
-                        ),
-                        "url_maps": concierto.ubicacion_ref.url_maps if concierto.ubicacion_ref else None
-                    }
-                } for concierto in conciertos
-            ]
+            "conciertos": [serializar_concierto(concierto) for concierto in conciertos]
         }
         
         return resultado
@@ -262,6 +324,9 @@ def ejecutar_scrapeo() -> List[Dict]:
 def _ejecutar_scrapeo() -> List[Dict]:
     url = "https://www.agendade.com.ar/agenda?deb54158_page="
     conciertos = []
+    # Momento de inicio de la corrida: los conciertos insertados a partir de acá
+    # se consideran "nuevos" para las novedades de artistas seguidos.
+    desde = datetime.now(timezone.utc)
     headers = {
         'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/91.0.4472.124 Safari/537.36'
     }
@@ -475,6 +540,13 @@ def _ejecutar_scrapeo() -> List[Dict]:
                 eliminar_conciertos_ausentes(claves_vigentes)
             else:
                 print("Sync: sin claves vigentes (scrapeo sin datos parseados), no se sincroniza.")
+            # Conciertos nuevos de artistas seguidos -> notificaciones + push.
+            n = registrar_novedades(desde)
+            if n:
+                print(f"Novedades registradas tras scrapeo: {n}")
+                enviados = enviar_push_novedades(desde)
+                if enviados:
+                    print(f"Push enviados tras scrapeo: {enviados}")
         else:
             print("Sync de ausentes omitido (scrapeo incompleto o sin datos suficientes).")
 
@@ -529,6 +601,394 @@ def estadisticas():
     except Exception as e:
         print(f"Error en /estadisticas: {e}")
         return {"error": str(e)}, 500
+
+# ============================ AUTENTICACIÓN ============================
+# Passwords con bcrypt (+ hash dummy para no revelar emails registrados) y
+# sesión con JWT HS256 que expira a las 24 h. Mismo esquema que BAsónicos.
+
+def hash_password(password: str) -> str:
+    return bcrypt.hashpw(password.encode('utf-8'), bcrypt.gensalt()).decode('utf-8')
+
+
+def verificar_password(password_hash: str, password: str) -> bool:
+    try:
+        return bcrypt.checkpw(password.encode('utf-8'), password_hash.encode('utf-8'))
+    except ValueError:
+        return False
+
+
+def generar_token(usuario_id: int) -> str:
+    ahora = datetime.now(timezone.utc)
+    payload = {
+        "sub": str(usuario_id),
+        "iat": ahora,
+        "exp": ahora + timedelta(hours=JWT_EXPIRACION_HORAS),
+    }
+    return pyjwt.encode(payload, JWT_SECRET, algorithm="HS256")
+
+
+def verificar_token(token: str) -> Optional[int]:
+    try:
+        payload = pyjwt.decode(token, JWT_SECRET, algorithms=["HS256"])
+        return int(payload.get("sub"))
+    except Exception:
+        return None
+
+
+def serializar_usuario(usuario: Usuarios) -> dict:
+    return {
+        "id": usuario.id,
+        "email": usuario.email,
+        "nombre": usuario.nombre,
+        "creado_en": usuario.creado_en.isoformat() if usuario.creado_en else None,
+    }
+
+
+def requiere_auth(f):
+    """Decorador: exige Authorization: Bearer <token> y guarda g.usuario_id."""
+    @wraps(f)
+    def wrapper(*args, **kwargs):
+        header = request.headers.get("Authorization", "")
+        if not header.startswith("Bearer "):
+            return jsonify({"error": "Se requiere autenticación"}), 401
+        token = header.split(" ", 1)[1]
+        usuario_id = verificar_token(token)
+        if usuario_id is None:
+            return jsonify({"error": "Token inválido o expirado"}), 401
+        g.usuario_id = usuario_id
+        return f(*args, **kwargs)
+    return wrapper
+
+
+def normalizar_email(email: str) -> str:
+    return (email or "").strip().lower()
+
+MINS_PASSWORD = 8
+MAX_PASSWORD = 72  # límite de bcrypt (72 bytes)
+
+
+def debilidades_password(password: str) -> List[str]:
+    """Reglas de complejidad que la contraseña no cumple (mismo criterio que BAsónicos)."""
+    if len(password) > MAX_PASSWORD:
+        return [f"no superar los {MAX_PASSWORD} caracteres"]
+    debilidades = []
+    if len(password) < MINS_PASSWORD:
+        debilidades.append(f"tener al menos {MINS_PASSWORD} caracteres")
+    tiene_mayuscula = any(c.isupper() for c in password)
+    tiene_minuscula = any(c.islower() for c in password)
+    tiene_digito = any(c.isdigit() for c in password)
+    tiene_especial = any((not c.isalnum() and not c.isspace()) for c in password)
+    if not tiene_mayuscula:
+        debilidades.append("incluir una letra mayúscula")
+    if not tiene_minuscula:
+        debilidades.append("incluir una letra minúscula")
+    if not tiene_digito:
+        debilidades.append("incluir un número")
+    if not tiene_especial:
+        debilidades.append("incluir un carácter especial")
+    return debilidades
+
+
+def _validar_registro(email: str, nombre: str, password: str) -> str:
+    if "@" not in email or "." not in email:
+        return "Email inválido"
+    if len(email) > 255:
+        return "Email demasiado largo"
+    if not nombre:
+        return "El nombre es obligatorio"
+    if len(nombre) > 80:
+        return "Nombre demasiado largo"
+    debilidades = debilidades_password(password)
+    if debilidades:
+        return "La contraseña debe " + ", ".join(debilidades)
+    return ""
+
+
+@app.route("/registro", methods=["POST"])
+def registro():
+    datos = request.get_json(silent=True) or {}
+    email = normalizar_email(datos.get("email") or "")
+    nombre = (datos.get("nombre") or "").strip()
+    password = datos.get("password") or ""
+
+    mensaje = _validar_registro(email, nombre, password)
+    if mensaje:
+        return jsonify({"error": mensaje}), 400
+
+    if bcrypt and Usuarios.query.filter_by(email=email).first():
+        return jsonify({"error": "Ya existe una cuenta con ese email"}), 409
+
+    usuario = Usuarios(email=email, nombre=nombre, password_hash=hash_password(password))
+    db.session.add(usuario)
+    try:
+        db.session.commit()
+    except IntegrityError:
+        db.session.rollback()
+        return jsonify({"error": "Ya existe una cuenta con ese email"}), 409
+
+    token = generar_token(usuario.id)
+    return jsonify({"token": token, "usuario": serializar_usuario(usuario)}), 201
+
+
+@app.route("/login", methods=["POST"])
+def login():
+    datos = request.get_json(silent=True) or {}
+    email = normalizar_email(datos.get("email") or "")
+    password = datos.get("password") or ""
+
+    usuario = Usuarios.query.filter_by(email=email).first()
+    if not usuario:
+        # Corre bcrypt contra un hash dummy para no revelar si el email existe.
+        verificar_password(HASH_DUMMY, password)
+        return jsonify({"error": "Email o contraseña incorrectos"}), 401
+    if not verificar_password(usuario.password_hash, password):
+        return jsonify({"error": "Email o contraseña incorrectos"}), 401
+
+    token = generar_token(usuario.id)
+    return jsonify({"token": token, "usuario": serializar_usuario(usuario)}), 200
+
+
+@app.route("/me")
+@requiere_auth
+def me():
+    usuario = db.session.get(Usuarios, g.usuario_id)
+    if not usuario:
+        return jsonify({"error": "Usuario no encontrado"}), 404
+    return jsonify(serializar_usuario(usuario))
+
+
+# ============================ FAVORITOS ============================
+@app.route("/favoritos")
+@requiere_auth
+def get_favoritos():
+    filas = (
+        db.session.query(Conciertos)
+        .join(Favoritos, Favoritos.concierto_id == Conciertos.id)
+        .filter(Favoritos.usuario_id == g.usuario_id)
+        .order_by(Favoritos.creado_en.desc(), Conciertos.id.desc())
+        .all()
+    )
+    return jsonify({"favoritos": [serializar_concierto(c) for c in filas]})
+
+
+@app.route("/favoritos/<int:concierto_id>", methods=["POST"])
+@requiere_auth
+def post_favorito(concierto_id):
+    if not db.session.get(Conciertos, concierto_id):
+        return jsonify({"error": "El concierto no existe"}), 404
+    db.session.add(Favoritos(usuario_id=g.usuario_id, concierto_id=concierto_id))
+    try:
+        db.session.commit()
+    except IntegrityError:
+        db.session.rollback()  # ya es favorito: idempotente
+    return jsonify({"exito": True}), 201
+
+
+@app.route("/favoritos/<int:concierto_id>", methods=["DELETE"])
+@requiere_auth
+def delete_favorito(concierto_id):
+    Favoritos.query.filter_by(usuario_id=g.usuario_id, concierto_id=concierto_id).delete()
+    db.session.commit()
+    return "", 204
+
+
+# ============================ SEGUIDOS ============================
+def normalizar_artista(artista: str) -> str:
+    return (artista or "").strip().lower()
+
+
+@app.route("/seguidos")
+@requiere_auth
+def get_seguidos():
+    artistas = [
+        s.artista for s in
+        Seguidos.query.filter_by(usuario_id=g.usuario_id).order_by(Seguidos.artista).all()
+    ]
+    return jsonify({"seguidos": artistas})
+
+
+@app.route("/seguidos", methods=["POST"])
+@requiere_auth
+def post_seguido():
+    datos = request.get_json(silent=True) or {}
+    artista = (datos.get("artista") or "").strip()
+    if not artista:
+        return jsonify({"error": "El artista es obligatorio"}), 400
+    if len(artista) > 80:
+        return jsonify({"error": "El nombre del artista es demasiado largo"}), 400
+
+    existe = Conciertos.query.filter(
+        func.lower(func.trim(Conciertos.artista)) == artista.lower()
+    ).first()
+    if not existe:
+        return jsonify({"error": "El artista no tiene conciertos cargados"}), 404
+
+    db.session.add(Seguidos(usuario_id=g.usuario_id, artista=normalizar_artista(artista)))
+    try:
+        db.session.commit()
+    except IntegrityError:
+        db.session.rollback()  # ya seguido: idempotente
+    return jsonify({"exito": True}), 201
+
+
+@app.route("/seguidos/<path:artista>", methods=["DELETE"])
+@requiere_auth
+def delete_seguido(artista):
+    artista = (artista or "").strip()
+    if not artista:
+        return jsonify({"error": "El artista es obligatorio"}), 400
+    Seguidos.query.filter_by(usuario_id=g.usuario_id, artista=normalizar_artista(artista)).delete()
+    db.session.commit()
+    return "", 204
+
+
+# ============================ NOVEDADES ============================
+def serializar_notificacion(notificacion, concierto):
+    return {
+        "id": notificacion.id,
+        "leida": notificacion.leida,
+        "creado_en": notificacion.creado_en.isoformat() if notificacion.creado_en else None,
+        "concierto": serializar_concierto(concierto),
+    }
+
+
+@app.route("/novedades")
+@requiere_auth
+def get_novedades():
+    no_leidas = Notificaciones.query.filter_by(usuario_id=g.usuario_id, leida=False).count()
+    filas = (
+        db.session.query(Notificaciones, Conciertos)
+        .join(Conciertos, Conciertos.id == Notificaciones.concierto_id)
+        .filter(Notificaciones.usuario_id == g.usuario_id)
+        .order_by(Notificaciones.creado_en.desc(), Notificaciones.id.desc())
+        .all()
+    )
+    notificaciones = [serializar_notificacion(n, c) for n, c in filas]
+    return jsonify({"no_leidas": no_leidas, "notificaciones": notificaciones})
+
+
+@app.route("/novedades/<int:notif_id>/leida", methods=["POST"])
+@requiere_auth
+def marcar_novedad_leida(notif_id):
+    Notificaciones.query.filter_by(id=notif_id, usuario_id=g.usuario_id).update({"leida": True})
+    db.session.commit()
+    return jsonify({"exito": True})
+
+
+@app.route("/novedades/leer_todas", methods=["POST"])
+@requiere_auth
+def marcar_todas_novedades_leidas():
+    Notificaciones.query.filter_by(usuario_id=g.usuario_id, leida=False).update({"leida": True})
+    db.session.commit()
+    return jsonify({"exito": True})
+
+
+# ============================ PUSH ============================
+@app.route("/clave_vapid")
+def get_clave_vapid():
+    if not VAPID_PUBLIC_KEY:
+        return jsonify({"error": "Push no configurado"}), 503
+    return jsonify({"clave_vapid": VAPID_PUBLIC_KEY})
+
+
+@app.route("/suscripcion_push", methods=["POST"])
+@requiere_auth
+def post_suscripcion_push():
+    datos = request.get_json(silent=True) or {}
+    endpoint = (datos.get("endpoint") or "").strip()
+    clave_publica = (datos.get("clave_publica") or "").strip()  # p256dh
+    autenticacion = (datos.get("autenticacion") or "").strip()  # auth
+    if not endpoint or not clave_publica or not autenticacion:
+        return jsonify({"error": "endpoint, clave_publica y autenticacion son obligatorios"}), 400
+
+    existente = SuscripcionesPush.query.filter_by(endpoint=endpoint).first()
+    if existente:
+        existente.usuario_id = g.usuario_id
+        existente.clave_publica = clave_publica
+        existente.autenticacion = autenticacion
+        db.session.commit()
+        return jsonify({"exito": True}), 201
+
+    db.session.add(SuscripcionesPush(
+        usuario_id=g.usuario_id, endpoint=endpoint,
+        clave_publica=clave_publica, autenticacion=autenticacion))
+    db.session.commit()
+    return jsonify({"exito": True}), 201
+
+
+@app.route("/suscripcion_push", methods=["DELETE"])
+@requiere_auth
+def delete_suscripcion_push():
+    datos = request.get_json(silent=True) or {}
+    endpoint = (datos.get("endpoint") or "").strip()
+    if not endpoint:
+        return jsonify({"error": "endpoint es obligatorio"}), 400
+    SuscripcionesPush.query.filter_by(usuario_id=g.usuario_id, endpoint=endpoint).delete()
+    db.session.commit()
+    return "", 204
+
+
+def _enviar_push(usuario_id, titulo, cuerpo, url) -> int:
+    if not (VAPID_PRIVATE_KEY and VAPID_SUBJECT):
+        return 0
+    suscripciones = SuscripcionesPush.query.filter_by(usuario_id=usuario_id).all()
+    enviados = 0
+    for s in suscripciones:
+        try:
+            webpush(
+                subscription_info={
+                    "endpoint": s.endpoint,
+                    "keys": {"p256dh": s.clave_publica, "auth": s.autenticacion},
+                },
+                data=json.dumps({"title": titulo, "body": cuerpo, "url": url}, ensure_ascii=False),
+                vapid_private_key=VAPID_PRIVATE_KEY,
+                vapid_claims={"sub": VAPID_SUBJECT},
+                timeout=10,
+            )
+            enviados += 1
+        except WebPushException as e:
+            if e.response is not None and e.response.status_code in (404, 410):
+                print(f"Push: endpoint inválido, se elimina la suscripción ({e.response.status_code}).")
+                db.session.delete(s)
+                db.session.commit()
+            else:
+                print(f"Push: error al enviar a {s.endpoint[:60]}...: {e}")
+        except Exception as e:
+            print(f"Push: error inesperado a {s.endpoint[:60]}...: {e}")
+    return enviados
+
+
+def enviar_push_novedades(desde: datetime) -> int:
+    """Envía push a los usuarios con suscripción que tienen novedades sin leer
+    de conciertos creados desde <desde> (los nuevos del scrape)."""
+    try:
+        filas = (
+            db.session.query(Notificaciones, Conciertos)
+            .join(Conciertos, Conciertos.id == Notificaciones.concierto_id)
+            .filter(
+                Notificaciones.leida == False,
+                Conciertos.creado_en >= desde,
+                Notificaciones.usuario_id.in_(
+                    db.session.query(SuscripcionesPush.usuario_id).distinct()))
+            .all()
+        )
+        total = 0
+        for notif, concierto in filas:
+            fecha = str(concierto.fecha) if concierto.fecha else ""
+            cuerpo = f"{concierto.nombre} - {fecha}".strip(" -")
+            total += _enviar_push(
+                notif.usuario_id,
+                f"Nuevo show de {concierto.artista}",
+                cuerpo,
+                concierto.url_evento or "")
+        return total
+    except Exception as e:
+        print(f"Push: error al procesar novedades: {e}")
+        db.session.rollback()
+        return 0
+
+# ======================================================================
+
 
 def get_coordenadas(location_name):
     """
@@ -724,6 +1184,26 @@ def _clave_concierto(artista, fecha, hora, lugar):
     return f"{a}|{f}|{h}|{(lugar or '').strip().lower()}"
 
 
+def registrar_novedades(desde: datetime) -> int:
+    """Crea una notificación por cada concierto insertado 'desde' <desde> que
+    matchea un artista seguido. Idempotente (ON CONFLICT DO NOTHING)."""
+    try:
+        resultado = db.session.execute(db.text("""
+            INSERT INTO notificaciones (usuario_id, concierto_id, leida)
+            SELECT s.usuario_id, c.id, false
+            FROM conciertos c
+            JOIN seguidos s ON lower(btrim(s.artista)) = lower(btrim(c.artista))
+            WHERE c.creado_en >= :desde
+            ON CONFLICT (usuario_id, concierto_id) DO NOTHING
+        """), {"desde": desde})
+        db.session.commit()
+        return resultado.rowcount or 0
+    except Exception as e:
+        print(f"Error al registrar novedades: {e}")
+        db.session.rollback()
+        return 0
+
+
 def eliminar_conciertos_ausentes(claves_vigentes):
     if not claves_vigentes:
         print("Sync: sin referencia (scrapeo sin datos), no se elimina nada.")
@@ -797,15 +1277,16 @@ def scheduler_scraper():
         time.sleep(interval_minutos * 60)
 
 # Limpieza inicial al arrancar (pasados + duplicados)
-try:
-    with app.app_context():
-        eliminar_conciertos_pasados()
-        eliminar_fuera_de_amba()
-        fusionar_ubicaciones()
-        eliminar_duplicados()
-        print("Limpieza inicial completada.")
-except Exception as e:
-    print(f"AVISO: limpieza inicial falló: {e}")
+if os.getenv("SKIP_MANTENIMIENTO_INICIAL") != "1":
+    try:
+        with app.app_context():
+            eliminar_conciertos_pasados()
+            eliminar_fuera_de_amba()
+            fusionar_ubicaciones()
+            eliminar_duplicados()
+            print("Limpieza inicial completada.")
+    except Exception as e:
+        print(f"AVISO: limpieza inicial falló: {e}")
 
 # Iniciar procesos en segundo plano al arrancar el servicio
 if os.getenv("KEEP_ALIVE_URL") or os.getenv("RENDER_EXTERNAL_URL"):

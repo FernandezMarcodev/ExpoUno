@@ -10,6 +10,10 @@
 #   python test_local.py scheduler                              # Verifica el hilo programado (intervalo 1 min, con stub)
 #   python test_local.py borrado_diferido                       # Verifica que el sync borra recién a las 2 corridas
 #   python test_local.py coords_null                            # Verifica que venues sin coordenadas no se borran
+#   python test_local.py auth                                   # Registro, login y /me (cuentas de usuario)
+#   python test_local.py favoritos                              # Like/quitar conciertos (no destructivo)
+#   python test_local.py seguidos_novedades                     # Seguir artistas + novedades (no destructivo)
+#   python test_local.py push                                    # Suscripción push + clave VAPID (no destructivo)
 #
 # Antes de importar back.py hay que apagar el scraper automático para que la
 # prueba no lance un scrapeo en background.
@@ -20,6 +24,10 @@ import time
 os.environ["KEEP_ALIVE_URL"] = ""
 os.environ["RENDER_EXTERNAL_URL"] = ""
 os.environ.setdefault("SCRAPER_INTERVALO_MINUTOS", "0")
+# Evita el DDL ALTER/CREATE INDEX y los DELETEs de la limpieza inicial: esos
+# toman locks/mutan la tabla conciertos, que en producción está en uso por el
+# backend desplegado.
+os.environ["SKIP_MANTENIMIENTO_INICIAL"] = "1"
 
 from datetime import date, datetime, timedelta
 
@@ -209,6 +217,315 @@ def coords_null():
     print("OK: conciertos/venues sin coordenadas no se borran.")
 
 
+def auth():
+    # Registro, login, /me, validaciones y duplicados. Usa el test client de Flask
+    # (no levanta servidor). Se ataca a una cuenta de prueba única.
+    import uuid
+    cliente = back.app.test_client()
+    email = f"test_{uuid.uuid4().hex[:10]}@prueba.com"
+
+    # Registro exitoso
+    r = cliente.post("/registro", json={"email": email, "nombre": "Usuario Test", "password": "Clave9!secreta"})
+    assert r.status_code == 201, f"registro ok: {r.status_code} {r.get_data(as_text=True)}"
+    datos = r.get_json()
+    assert datos["token"] and datos["usuario"]["email"] == email
+    assert datos["usuario"]["nombre"] == "Usuario Test"
+    print("OK registro: 201 con token y usuario.")
+
+    # Duplicado -> 409
+    r = cliente.post("/registro", json={"email": email.upper(), "nombre": "Otro", "password": "Clave9!secreta"})
+    assert r.status_code == 409, f"duplicado: {r.status_code}"
+    print("OK registro duplicado: 409 (email normaliza a minúsculas).")
+
+    # Password débil -> 400
+    r = cliente.post("/registro", json={"email": "x@x.com", "nombre": "X", "password": "corta"})
+    assert r.status_code == 400, f"password debil: {r.status_code}"
+    assert "La contraseña debe" in r.get_json()["error"]
+    print("OK password débil: 400 con detalle.")
+
+    # Login correcto
+    r = cliente.post("/login", json={"email": email, "password": "Clave9!secreta"})
+    assert r.status_code == 200, f"login ok: {r.status_code} {r.get_data(as_text=True)}"
+    token = r.get_json()["token"]
+    assert token
+    print("OK login: 200 con token.")
+
+    # Login con password incorrecto -> 401
+    r = cliente.post("/login", json={"email": email, "password": "ClaveEquivocada1!"})
+    assert r.status_code == 401
+    print("OK login incorrecto: 401.")
+
+    # Login con email inexistente -> 401 (mismo mensaje genérico)
+    r = cliente.post("/login", json={"email": "no_existe@prueba.com", "password": "Clave9!secreta"})
+    assert r.status_code == 401
+    assert "incorrectos" in r.get_json()["error"]
+    print("OK login email inexistente: 401 genérico.")
+
+    # /me sin token -> 401
+    r = cliente.get("/me")
+    assert r.status_code == 401
+    print("OK /me sin token: 401.")
+
+    # /me con token -> perfil
+    r = cliente.get("/me", headers={"Authorization": f"Bearer {token}"})
+    assert r.status_code == 200, f"/me: {r.status_code}"
+    assert r.get_json()["id"] == datos["usuario"]["id"]
+    print("OK /me con token: perfil correcto.")
+
+    # /me con token corrupto -> 401
+    r = cliente.get("/me", headers={"Authorization": "Bearer token-invalido"})
+    assert r.status_code == 401
+    print("OK /me token inválido: 401.")
+
+
+def favoritos():
+    # Like (favorito) de conciertos: agregar, listar, duplicado idempotente,
+    # 404 si el concierto no existe y quitar. Crea datos de prueba y los limpia
+    # al final (no destructivo).
+    import uuid
+    cliente = back.app.test_client()
+    email = f"fav_{uuid.uuid4().hex[:12]}@prueba.com"
+
+    with back.app.app_context():
+        # Concierto de prueba (fecha futura, dentro de AMBA para no ser borrado vivo).
+        punto = back.WKTElement("POINT(-58.3816 -34.6037)", srid=4326)
+        venue = back.Ubicaciones(nombre="Venue Favoritos Test", capacidad_total=0, coordenadas=punto)
+        back.db.session.add(venue)
+        back.db.session.commit()
+        concierto = back.Conciertos(
+            nombre="Show Favoritos Test", artista="Artista Fav Test", url_evento="https://e.com/fav",
+            ubicacion=venue.id, fecha=date.today() + timedelta(days=90),
+            hora=datetime.strptime("21:00", "%H:%M").time())
+        back.db.session.add(concierto)
+        back.db.session.commit()
+        concierto_id = concierto.id
+
+    try:
+        r = cliente.post("/registro", json={"email": email, "nombre": "Fav Test", "password": "Clave9!secreta"})
+        assert r.status_code == 201, r.get_data(as_text=True)
+        token = r.get_json()["token"]
+
+        # Sin token -> 401
+        r = cliente.get("/favoritos")
+        assert r.status_code == 401
+        print("OK favoritos sin token: 401.")
+
+        h = {"Authorization": f"Bearer {token}"}
+
+        r = cliente.post(f"/favoritos/{concierto_id}", headers=h)
+        assert r.status_code == 201, r.get_data(as_text=True)
+        print("OK favorito agregado: 201.")
+
+        # Idempotente
+        r = cliente.post(f"/favoritos/{concierto_id}", headers=h)
+        assert r.status_code == 201, r.get_data(as_text=True)
+        print("OK favorito duplicado: 201 idempotente.")
+
+        r = cliente.get("/favoritos", headers=h)
+        assert r.status_code == 200
+        lista = r.get_json()["favoritos"]
+        assert any(c["id"] == concierto_id for c in lista), "no aparece el favorito"
+        assert lista[0]["artista"] == "Artista Fav Test"
+        print(f"OK listar favoritos: {len(lista)} favorito(s) con shape correcto.")
+
+        r = cliente.post("/favoritos/99999999", headers=h)
+        assert r.status_code == 404
+        print("OK favorito concierto inexistente: 404.")
+
+        r = cliente.delete(f"/favoritos/{concierto_id}", headers=h)
+        assert r.status_code == 204, r.get_data(as_text=True)
+        print("OK quitar favorito: 204.")
+
+        r = cliente.get("/favoritos", headers=h)
+        assert not any(c["id"] == concierto_id for c in r.get_json()["favoritos"])
+        print("OK favoritos vacíos tras quitar.")
+
+        # Quitar de nuevo: idempotente
+        r = cliente.delete(f"/favoritos/{concierto_id}", headers=h)
+        assert r.status_code == 204
+        print("OK quitar favorito ausente: 204 idempotente.")
+    finally:
+        with back.app.app_context():
+            back.db.session.execute(back.db.text(
+                "DELETE FROM favoritos WHERE usuario_id = (SELECT id FROM usuarios WHERE email = :em)"), {"em": email})
+            back.db.session.execute(back.db.text("DELETE FROM usuarios WHERE email = :em"), {"em": email})
+            back.db.session.execute(back.db.text(
+                "DELETE FROM conciertos WHERE id = :cid"), {"cid": concierto_id})
+            back.db.session.execute(back.db.text(
+                "DELETE FROM ubicaciones WHERE nombre = 'Venue Favoritos Test'"))
+            back.db.session.commit()
+    print("Limpieza completa.")
+
+
+def seguidos_novedades():
+    # Seguir/dejar de seguir artistas y generación de notificaciones de
+    # conciertos nuevos (novedades). Crea datos de prueba y los limpia al final.
+    import uuid
+    from urllib.parse import quote
+    cliente = back.app.test_client()
+    email = f"seg_{uuid.uuid4().hex[:12]}@prueba.com"
+    artista = "Artista Novedades Test"
+    nombre_concert = "Show Novedades Test"
+
+    with back.app.app_context():
+        punto = back.WKTElement("POINT(-58.3816 -34.6037)", srid=4326)
+        venue = back.Ubicaciones(nombre="Venue Novedades Test", capacidad_total=0, coordenadas=punto)
+        back.db.session.add(venue)
+        back.db.session.commit()
+        concierto = back.Conciertos(
+            nombre=nombre_concert, artista=artista, url_evento="https://e.com/nov",
+            ubicacion=venue.id, fecha=date.today() + timedelta(days=90),
+            hora=datetime.strptime("22:00", "%H:%M").time())
+        back.db.session.add(concierto)
+        back.db.session.commit()
+        concierto_id = concierto.id
+        desde = back.datetime.now(back.timezone.utc) - back.timedelta(minutes=1)
+
+    try:
+        r = cliente.post("/registro", json={"email": email, "nombre": "Seg Test", "password": "Clave9!secreta"})
+        assert r.status_code == 201, r.get_data(as_text=True)
+        token = r.get_json()["token"]
+        h = {"Authorization": f"Bearer {token}"}
+
+        # Lista vacía
+        r = cliente.get("/seguidos", headers=h)
+        assert r.status_code == 200 and r.get_json()["seguidos"] == []
+        print("OK seguidos vacío.")
+
+        # Seguir artista existente
+        r = cliente.post("/seguidos", headers=h, json={"artista": artista})
+        assert r.status_code == 201, r.get_data(as_text=True)
+        print("OK seguir artista: 201.")
+
+        # Idempotente
+        r = cliente.post("/seguidos", headers=h, json={"artista": artista.upper()})
+        assert r.status_code == 201
+        print("OK seguir duplicado: 201 idempotente (normaliza).")
+
+        # Artista sin conciertos -> 404
+        r = cliente.post("/seguidos", headers=h, json={"artista": "Artista Que No Existe 123"})
+        assert r.status_code == 404, r.get_data(as_text=True)
+        print("OK seguir artista inexistente: 404.")
+
+        # Vacío obligatorio
+        r = cliente.post("/seguidos", headers=h, json={"artista": ""})
+        assert r.status_code == 400
+        print("OK artista vacío: 400.")
+
+        r = cliente.get("/seguidos", headers=h)
+        assert r.get_json()["seguidos"] == [artista.lower()]
+        print("OK lista seguidos normalizada.")
+
+        # Registrar novedades tras un "scrape" (insert del concierto ya hecho)
+        with back.app.app_context():
+            n = back.registrar_novedades(desde)
+            assert n >= 1, f"registrar_novedades devolvió {n}"
+        print(f"OK novedades registradas: {n}.")
+
+        r = cliente.get("/novedades", headers=h)
+        assert r.status_code == 200
+        datos = r.get_json()
+        assert datos["no_leidas"] >= 1
+        notif = next(nn for nn in datos["notificaciones"] if nn["concierto"]["id"] == concierto_id)
+        assert notif["concierto"]["artista"] == artista
+        print("OK novedades listadas con el concierto.")
+
+        # Marcar una leída
+        r = cliente.post(f"/novedades/{notif['id']}/leida", headers=h)
+        assert r.status_code == 200, r.get_data(as_text=True)
+        r = cliente.get("/novedades", headers=h)
+        assert r.get_json()["no_leidas"] == 0
+        print("OK marcar novedad leída.")
+
+        # Insertar otra novedad y marcar todas
+        with back.app.app_context():
+            n = back.registrar_novedades(back.datetime.now(back.timezone.utc) - back.timedelta(minutes=1))
+            r = cliente.post("/novedades/leer_todas", headers=h)
+            assert r.status_code == 200
+            r = cliente.get("/novedades", headers=h)
+            assert r.get_json()["no_leidas"] == 0
+        print("OK marcar todas leídas.")
+
+        # Dejar de seguir
+        r = cliente.delete(f"/seguidos/{quote(artista)}", headers=h)
+        assert r.status_code == 204, r.get_data(as_text=True)
+        r = cliente.get("/seguidos", headers=h)
+        assert r.get_json()["seguidos"] == []
+        print("OK dejar de seguir: 204.")
+
+        r = cliente.delete(f"/seguidos/{quote(artista)}", headers=h)
+        assert r.status_code == 204
+        print("OK dejar de seguir ausente: 204 idempotente.")
+    finally:
+        with back.app.app_context():
+            back.db.session.execute(back.db.text(
+                "DELETE FROM notificaciones WHERE usuario_id = (SELECT id FROM usuarios WHERE email = :em)"), {"em": email})
+            back.db.session.execute(back.db.text(
+                "DELETE FROM seguidos WHERE usuario_id = (SELECT id FROM usuarios WHERE email = :em)"), {"em": email})
+            back.db.session.execute(back.db.text("DELETE FROM usuarios WHERE email = :em"), {"em": email})
+            back.db.session.execute(back.db.text("DELETE FROM conciertos WHERE id = :cid"), {"cid": concierto_id})
+            back.db.session.execute(back.db.text(
+                "DELETE FROM ubicaciones WHERE nombre = 'Venue Novedades Test'"))
+            back.db.session.commit()
+    print("Limpieza completa.")
+
+
+def push():
+    # Clave VAPID pública y alta/baja de suscripción push (no envía push real).
+    import uuid
+    cliente = back.app.test_client()
+    email = f"push_{uuid.uuid4().hex[:12]}@prueba.com"
+    endpoint = f"https://x.example.com/push/{uuid.uuid4().hex}"
+
+    r = cliente.get("/clave_vapid")
+    assert r.status_code == 200, r.get_data(as_text=True)
+    assert r.get_json()["clave_vapid"]
+    print("OK clave_vapid pública expuesta.")
+
+    r = cliente.post("/suscripcion_push", json={
+        "endpoint": endpoint, "clave_publica": "AAA", "autenticacion": "BBB"})
+    assert r.status_code == 401
+    print("OK suscripción sin token: 401.")
+
+    r = cliente.post("/registro", json={"email": email, "nombre": "Push Test", "password": "Clave9!secreta"})
+    assert r.status_code == 201, r.get_data(as_text=True)
+    token = r.get_json()["token"]
+    h = {"Authorization": f"Bearer {token}"}
+
+    r = cliente.post("/suscripcion_push", headers=h, json={
+        "endpoint": endpoint, "clave_publica": "AAA", "autenticacion": "BBB"})
+    assert r.status_code == 201, r.get_data(as_text=True)
+    print("OK suscripción creada: 201.")
+
+    r = cliente.post("/suscripcion_push", headers=h, json={
+        "endpoint": endpoint, "clave_publica": "AAA", "autenticacion": "BBB"})
+    assert r.status_code == 201
+    print("OK suscripción duplicada: 201 idempotente.")
+
+    r = cliente.post("/suscripcion_push", headers=h, json={"endpoint": ""})
+    assert r.status_code == 400
+    print("OK suscripción con datos incompletos: 400.")
+
+    with back.app.app_context():
+        n = back.enviar_push_novedades(back.datetime.now(back.timezone.utc))
+        assert n == 0, f"enviar_push devolvió {n} sin novedades"
+    print("OK enviar_push no envía con desde-futuro (0).")
+
+    r = cliente.delete("/suscripcion_push", headers=h, json={"endpoint": endpoint})
+    assert r.status_code == 204, r.get_data(as_text=True)
+    print("OK suscripción eliminada: 204.")
+
+    r = cliente.delete("/suscripcion_push", headers=h, json={"endpoint": endpoint})
+    assert r.status_code == 204
+    print("OK eliminar suscripción ausente: 204 idempotente.")
+
+    with back.app.app_context():
+        back.db.session.execute(back.db.text("DELETE FROM usuarios WHERE email = :em"), {"em": email})
+        back.db.session.execute(back.db.text("DELETE FROM suscripciones_push WHERE endpoint = :ep"), {"ep": endpoint})
+        back.db.session.commit()
+    print("Limpieza completa.")
+
+
 if __name__ == "__main__":
     sys.argv = sys.argv[1:] or ["verify"]
     {
@@ -219,4 +536,8 @@ if __name__ == "__main__":
         "scheduler": scheduler,
         "borrado_diferido": borrado_diferido,
         "coords_null": coords_null,
+        "auth": auth,
+        "favoritos": favoritos,
+        "seguidos_novedades": seguidos_novedades,
+        "push": push,
     }[sys.argv[0]]()

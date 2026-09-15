@@ -9,3 +9,6 @@ psycopg2-binary
 waitress
 flask-cors
 python-dotenv
+PyJWT
+bcrypt
+pywebpush
