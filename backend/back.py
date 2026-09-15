@@ -115,6 +115,23 @@ class Favoritos(db.Model):
     concierto_id = db.Column(db.Integer, db.ForeignKey('conciertos.id', ondelete='CASCADE'), primary_key=True)
     creado_en = db.Column(db.DateTime(timezone=True), server_default=db.func.now())
 
+class Seguidos(db.Model):
+    __tablename__ = 'seguidos'
+    id = db.Column(db.Integer, primary_key=True)
+    usuario_id = db.Column(db.Integer, db.ForeignKey('usuarios.id', ondelete='CASCADE'), nullable=False)
+    artista = db.Column(db.Text, nullable=False)
+    creado_en = db.Column(db.DateTime(timezone=True), server_default=db.func.now())
+    __table_args__ = (db.UniqueConstraint('usuario_id', 'artista', name='uq_seguidos_usuario_artista'),)
+
+class Notificaciones(db.Model):
+    __tablename__ = 'notificaciones'
+    id = db.Column(db.Integer, primary_key=True)
+    usuario_id = db.Column(db.Integer, db.ForeignKey('usuarios.id', ondelete='CASCADE'), nullable=False)
+    concierto_id = db.Column(db.Integer, db.ForeignKey('conciertos.id', ondelete='CASCADE'), nullable=False)
+    leida = db.Column(db.Boolean, nullable=False, default=False, server_default=db.text("false"))
+    creado_en = db.Column(db.DateTime(timezone=True), server_default=db.func.now())
+    __table_args__ = (db.UniqueConstraint('usuario_id', 'concierto_id', name='uq_notificaciones_usuario_concierto'),)
+
 # Región: solo Buenos Aires y alrededores (CABA + GBA + La Plata/Cañuelas).
 AMBA_MIN_LAT = -35.15
 AMBA_MAX_LAT = -34.2
@@ -139,24 +156,37 @@ with app.app_context():
     except Exception as e:
         print(f"AVISO: no se pudieron crear/verificar las tablas: {e}")
         db.session.rollback()
-    try:
-        # db.create_all() no altera tablas existentes: se agrega la columna
-        # de borrado diferido ("misses") si la instancia ya tiene la tabla.
-        db.session.execute(db.text("ALTER TABLE conciertos ADD COLUMN IF NOT EXISTS misses INTEGER NOT NULL DEFAULT 0"))
-        db.session.commit()
-        print("Columna 'misses' verificada/creada.")
-    except Exception as e:
-        print(f"AVISO: no se pudo verificar la columna 'misses': {e}")
-        db.session.rollback()
-    try:
-        # Marca de tiempo de inserción del concierto: clave para detectar
-        # conciertos nuevos tras un scrape (novedades de artistas seguidos).
-        db.session.execute(db.text("ALTER TABLE conciertos ADD COLUMN IF NOT EXISTS creado_en TIMESTAMPTZ NOT NULL DEFAULT now()"))
-        db.session.commit()
-        print("Columna 'creado_en' verificada/creada.")
-    except Exception as e:
-        print(f"AVISO: no se pudo verificar la columna 'creado_en': {e}")
-        db.session.rollback()
+    if os.getenv("SKIP_MANTENIMIENTO_INICIAL") != "1":
+        # Con SKIP_MANTENIMIENTO_INICIAL=1 se saltea el DDL y la limpieza que
+        # toma locks sobre tablas existentes (útil para tests contra BD en uso).
+        try:
+            # db.create_all() no altera tablas existentes: se agrega la columna
+            # de borrado diferido ("misses") si la instancia ya tiene la tabla.
+            db.session.execute(db.text("ALTER TABLE conciertos ADD COLUMN IF NOT EXISTS misses INTEGER NOT NULL DEFAULT 0"))
+            db.session.commit()
+            print("Columna 'misses' verificada/creada.")
+        except Exception as e:
+            print(f"AVISO: no se pudo verificar la columna 'misses': {e}")
+            db.session.rollback()
+        try:
+            # Marca de tiempo de inserción del concierto: clave para detectar
+            # conciertos nuevos tras un scrape (novedades de artistas seguidos).
+            db.session.execute(db.text("ALTER TABLE conciertos ADD COLUMN IF NOT EXISTS creado_en TIMESTAMPTZ NOT NULL DEFAULT now()"))
+            db.session.commit()
+            print("Columna 'creado_en' verificada/creada.")
+        except Exception as e:
+            print(f"AVISO: no se pudo verificar la columna 'creado_en': {e}")
+            db.session.rollback()
+        try:
+            # Asegura default de las nuevas columnas ya existentes y acelera el
+            # match normalizado de artistas (seguidos/novedades).
+            db.session.execute(db.text("ALTER TABLE notificaciones ALTER COLUMN leida SET DEFAULT false"))
+            db.session.execute(db.text("CREATE INDEX IF NOT EXISTS idx_conciertos_artista_lower ON conciertos (lower(btrim(artista)))"))
+            db.session.commit()
+            print("Índice de artistas verificada/creado.")
+        except Exception as e:
+            print(f"AVISO: no se pudo verificar el índice de artistas: {e}")
+            db.session.rollback()
 
 #rutas
 @app.route("/")
@@ -279,6 +309,9 @@ def ejecutar_scrapeo() -> List[Dict]:
 def _ejecutar_scrapeo() -> List[Dict]:
     url = "https://www.agendade.com.ar/agenda?deb54158_page="
     conciertos = []
+    # Momento de inicio de la corrida: los conciertos insertados a partir de acá
+    # se consideran "nuevos" para las novedades de artistas seguidos.
+    desde = datetime.now(timezone.utc)
     headers = {
         'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/91.0.4472.124 Safari/537.36'
     }
@@ -492,6 +525,10 @@ def _ejecutar_scrapeo() -> List[Dict]:
                 eliminar_conciertos_ausentes(claves_vigentes)
             else:
                 print("Sync: sin claves vigentes (scrapeo sin datos parseados), no se sincroniza.")
+            # Conciertos nuevos de artistas seguidos -> notificaciones.
+            n = registrar_novedades(desde)
+            if n:
+                print(f"Novedades registradas tras scrapeo: {n}")
         else:
             print("Sync de ausentes omitido (scrapeo incompleto o sin datos suficientes).")
 
@@ -736,6 +773,97 @@ def delete_favorito(concierto_id):
     db.session.commit()
     return "", 204
 
+
+# ============================ SEGUIDOS ============================
+def normalizar_artista(artista: str) -> str:
+    return (artista or "").strip().lower()
+
+
+@app.route("/seguidos")
+@requiere_auth
+def get_seguidos():
+    artistas = [
+        s.artista for s in
+        Seguidos.query.filter_by(usuario_id=g.usuario_id).order_by(Seguidos.artista).all()
+    ]
+    return jsonify({"seguidos": artistas})
+
+
+@app.route("/seguidos", methods=["POST"])
+@requiere_auth
+def post_seguido():
+    datos = request.get_json(silent=True) or {}
+    artista = (datos.get("artista") or "").strip()
+    if not artista:
+        return jsonify({"error": "El artista es obligatorio"}), 400
+    if len(artista) > 80:
+        return jsonify({"error": "El nombre del artista es demasiado largo"}), 400
+
+    existe = Conciertos.query.filter(
+        func.lower(func.trim(Conciertos.artista)) == artista.lower()
+    ).first()
+    if not existe:
+        return jsonify({"error": "El artista no tiene conciertos cargados"}), 404
+
+    db.session.add(Seguidos(usuario_id=g.usuario_id, artista=normalizar_artista(artista)))
+    try:
+        db.session.commit()
+    except IntegrityError:
+        db.session.rollback()  # ya seguido: idempotente
+    return jsonify({"exito": True}), 201
+
+
+@app.route("/seguidos/<path:artista>", methods=["DELETE"])
+@requiere_auth
+def delete_seguido(artista):
+    artista = (artista or "").strip()
+    if not artista:
+        return jsonify({"error": "El artista es obligatorio"}), 400
+    Seguidos.query.filter_by(usuario_id=g.usuario_id, artista=normalizar_artista(artista)).delete()
+    db.session.commit()
+    return "", 204
+
+
+# ============================ NOVEDADES ============================
+def serializar_notificacion(notificacion, concierto):
+    return {
+        "id": notificacion.id,
+        "leida": notificacion.leida,
+        "creado_en": notificacion.creado_en.isoformat() if notificacion.creado_en else None,
+        "concierto": serializar_concierto(concierto),
+    }
+
+
+@app.route("/novedades")
+@requiere_auth
+def get_novedades():
+    no_leidas = Notificaciones.query.filter_by(usuario_id=g.usuario_id, leida=False).count()
+    filas = (
+        db.session.query(Notificaciones, Conciertos)
+        .join(Conciertos, Conciertos.id == Notificaciones.concierto_id)
+        .filter(Notificaciones.usuario_id == g.usuario_id)
+        .order_by(Notificaciones.creado_en.desc(), Notificaciones.id.desc())
+        .all()
+    )
+    notificaciones = [serializar_notificacion(n, c) for n, c in filas]
+    return jsonify({"no_leidas": no_leidas, "notificaciones": notificaciones})
+
+
+@app.route("/novedades/<int:notif_id>/leida", methods=["POST"])
+@requiere_auth
+def marcar_novedad_leida(notif_id):
+    Notificaciones.query.filter_by(id=notif_id, usuario_id=g.usuario_id).update({"leida": True})
+    db.session.commit()
+    return jsonify({"exito": True})
+
+
+@app.route("/novedades/leer_todas", methods=["POST"])
+@requiere_auth
+def marcar_todas_novedades_leidas():
+    Notificaciones.query.filter_by(usuario_id=g.usuario_id, leida=False).update({"leida": True})
+    db.session.commit()
+    return jsonify({"exito": True})
+
 # ======================================================================
 
 
@@ -933,6 +1061,26 @@ def _clave_concierto(artista, fecha, hora, lugar):
     return f"{a}|{f}|{h}|{(lugar or '').strip().lower()}"
 
 
+def registrar_novedades(desde: datetime) -> int:
+    """Crea una notificación por cada concierto insertado 'desde' <desde> que
+    matchea un artista seguido. Idempotente (ON CONFLICT DO NOTHING)."""
+    try:
+        resultado = db.session.execute(db.text("""
+            INSERT INTO notificaciones (usuario_id, concierto_id, leida)
+            SELECT s.usuario_id, c.id, false
+            FROM conciertos c
+            JOIN seguidos s ON lower(btrim(s.artista)) = lower(btrim(c.artista))
+            WHERE c.creado_en >= :desde
+            ON CONFLICT (usuario_id, concierto_id) DO NOTHING
+        """), {"desde": desde})
+        db.session.commit()
+        return resultado.rowcount or 0
+    except Exception as e:
+        print(f"Error al registrar novedades: {e}")
+        db.session.rollback()
+        return 0
+
+
 def eliminar_conciertos_ausentes(claves_vigentes):
     if not claves_vigentes:
         print("Sync: sin referencia (scrapeo sin datos), no se elimina nada.")
@@ -1006,15 +1154,16 @@ def scheduler_scraper():
         time.sleep(interval_minutos * 60)
 
 # Limpieza inicial al arrancar (pasados + duplicados)
-try:
-    with app.app_context():
-        eliminar_conciertos_pasados()
-        eliminar_fuera_de_amba()
-        fusionar_ubicaciones()
-        eliminar_duplicados()
-        print("Limpieza inicial completada.")
-except Exception as e:
-    print(f"AVISO: limpieza inicial falló: {e}")
+if os.getenv("SKIP_MANTENIMIENTO_INICIAL") != "1":
+    try:
+        with app.app_context():
+            eliminar_conciertos_pasados()
+            eliminar_fuera_de_amba()
+            fusionar_ubicaciones()
+            eliminar_duplicados()
+            print("Limpieza inicial completada.")
+    except Exception as e:
+        print(f"AVISO: limpieza inicial falló: {e}")
 
 # Iniciar procesos en segundo plano al arrancar el servicio
 if os.getenv("KEEP_ALIVE_URL") or os.getenv("RENDER_EXTERNAL_URL"):

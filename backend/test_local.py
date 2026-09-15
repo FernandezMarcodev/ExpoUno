@@ -12,6 +12,7 @@
 #   python test_local.py coords_null                            # Verifica que venues sin coordenadas no se borran
 #   python test_local.py auth                                   # Registro, login y /me (cuentas de usuario)
 #   python test_local.py favoritos                              # Like/quitar conciertos (no destructivo)
+#   python test_local.py seguidos_novedades                     # Seguir artistas + novedades (no destructivo)
 #
 # Antes de importar back.py hay que apagar el scraper automático para que la
 # prueba no lance un scrapeo en background.
@@ -22,6 +23,10 @@ import time
 os.environ["KEEP_ALIVE_URL"] = ""
 os.environ["RENDER_EXTERNAL_URL"] = ""
 os.environ.setdefault("SCRAPER_INTERVALO_MINUTOS", "0")
+# Evita el DDL ALTER/CREATE INDEX y los DELETEs de la limpieza inicial: esos
+# toman locks/mutan la tabla conciertos, que en producción está en uso por el
+# backend desplegado.
+os.environ["SKIP_MANTENIMIENTO_INICIAL"] = "1"
 
 from datetime import date, datetime, timedelta
 
@@ -351,6 +356,119 @@ def favoritos():
     print("Limpieza completa.")
 
 
+def seguidos_novedades():
+    # Seguir/dejar de seguir artistas y generación de notificaciones de
+    # conciertos nuevos (novedades). Crea datos de prueba y los limpia al final.
+    import uuid
+    from urllib.parse import quote
+    cliente = back.app.test_client()
+    email = f"seg_{uuid.uuid4().hex[:12]}@prueba.com"
+    artista = "Artista Novedades Test"
+    nombre_concert = "Show Novedades Test"
+
+    with back.app.app_context():
+        punto = back.WKTElement("POINT(-58.3816 -34.6037)", srid=4326)
+        venue = back.Ubicaciones(nombre="Venue Novedades Test", capacidad_total=0, coordenadas=punto)
+        back.db.session.add(venue)
+        back.db.session.commit()
+        concierto = back.Conciertos(
+            nombre=nombre_concert, artista=artista, url_evento="https://e.com/nov",
+            ubicacion=venue.id, fecha=date.today() + timedelta(days=90),
+            hora=datetime.strptime("22:00", "%H:%M").time())
+        back.db.session.add(concierto)
+        back.db.session.commit()
+        concierto_id = concierto.id
+        desde = back.datetime.now(back.timezone.utc) - back.timedelta(minutes=1)
+
+    try:
+        r = cliente.post("/registro", json={"email": email, "nombre": "Seg Test", "password": "Clave9!secreta"})
+        assert r.status_code == 201, r.get_data(as_text=True)
+        token = r.get_json()["token"]
+        h = {"Authorization": f"Bearer {token}"}
+
+        # Lista vacía
+        r = cliente.get("/seguidos", headers=h)
+        assert r.status_code == 200 and r.get_json()["seguidos"] == []
+        print("OK seguidos vacío.")
+
+        # Seguir artista existente
+        r = cliente.post("/seguidos", headers=h, json={"artista": artista})
+        assert r.status_code == 201, r.get_data(as_text=True)
+        print("OK seguir artista: 201.")
+
+        # Idempotente
+        r = cliente.post("/seguidos", headers=h, json={"artista": artista.upper()})
+        assert r.status_code == 201
+        print("OK seguir duplicado: 201 idempotente (normaliza).")
+
+        # Artista sin conciertos -> 404
+        r = cliente.post("/seguidos", headers=h, json={"artista": "Artista Que No Existe 123"})
+        assert r.status_code == 404, r.get_data(as_text=True)
+        print("OK seguir artista inexistente: 404.")
+
+        # Vacío obligatorio
+        r = cliente.post("/seguidos", headers=h, json={"artista": ""})
+        assert r.status_code == 400
+        print("OK artista vacío: 400.")
+
+        r = cliente.get("/seguidos", headers=h)
+        assert r.get_json()["seguidos"] == [artista.lower()]
+        print("OK lista seguidos normalizada.")
+
+        # Registrar novedades tras un "scrape" (insert del concierto ya hecho)
+        with back.app.app_context():
+            n = back.registrar_novedades(desde)
+            assert n >= 1, f"registrar_novedades devolvió {n}"
+        print(f"OK novedades registradas: {n}.")
+
+        r = cliente.get("/novedades", headers=h)
+        assert r.status_code == 200
+        datos = r.get_json()
+        assert datos["no_leidas"] >= 1
+        notif = next(nn for nn in datos["notificaciones"] if nn["concierto"]["id"] == concierto_id)
+        assert notif["concierto"]["artista"] == artista
+        print("OK novedades listadas con el concierto.")
+
+        # Marcar una leída
+        r = cliente.post(f"/novedades/{notif['id']}/leida", headers=h)
+        assert r.status_code == 200, r.get_data(as_text=True)
+        r = cliente.get("/novedades", headers=h)
+        assert r.get_json()["no_leidas"] == 0
+        print("OK marcar novedad leída.")
+
+        # Insertar otra novedad y marcar todas
+        with back.app.app_context():
+            n = back.registrar_novedades(back.datetime.now(back.timezone.utc) - back.timedelta(minutes=1))
+            r = cliente.post("/novedades/leer_todas", headers=h)
+            assert r.status_code == 200
+            r = cliente.get("/novedades", headers=h)
+            assert r.get_json()["no_leidas"] == 0
+        print("OK marcar todas leídas.")
+
+        # Dejar de seguir
+        r = cliente.delete(f"/seguidos/{quote(artista)}", headers=h)
+        assert r.status_code == 204, r.get_data(as_text=True)
+        r = cliente.get("/seguidos", headers=h)
+        assert r.get_json()["seguidos"] == []
+        print("OK dejar de seguir: 204.")
+
+        r = cliente.delete(f"/seguidos/{quote(artista)}", headers=h)
+        assert r.status_code == 204
+        print("OK dejar de seguir ausente: 204 idempotente.")
+    finally:
+        with back.app.app_context():
+            back.db.session.execute(back.db.text(
+                "DELETE FROM notificaciones WHERE usuario_id = (SELECT id FROM usuarios WHERE email = :em)"), {"em": email})
+            back.db.session.execute(back.db.text(
+                "DELETE FROM seguidos WHERE usuario_id = (SELECT id FROM usuarios WHERE email = :em)"), {"em": email})
+            back.db.session.execute(back.db.text("DELETE FROM usuarios WHERE email = :em"), {"em": email})
+            back.db.session.execute(back.db.text("DELETE FROM conciertos WHERE id = :cid"), {"cid": concierto_id})
+            back.db.session.execute(back.db.text(
+                "DELETE FROM ubicaciones WHERE nombre = 'Venue Novedades Test'"))
+            back.db.session.commit()
+    print("Limpieza completa.")
+
+
 if __name__ == "__main__":
     sys.argv = sys.argv[1:] or ["verify"]
     {
@@ -363,4 +481,5 @@ if __name__ == "__main__":
         "coords_null": coords_null,
         "auth": auth,
         "favoritos": favoritos,
+        "seguidos_novedades": seguidos_novedades,
     }[sys.argv[0]]()
