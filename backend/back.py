@@ -1,31 +1,40 @@
-from flask import Flask
+from flask import Flask, request, jsonify, g
 from flask_sqlalchemy import SQLAlchemy
 from geoalchemy2 import Geometry, WKTElement
 from sqlalchemy.dialects.postgresql import BOOLEAN, DATE, TIME
 from geoalchemy2.shape import to_shape
 from sqlalchemy import func, and_
-from flask import request
 from markupsafe import escape
 import requests
 from bs4 import BeautifulSoup
 import time
-from typing import List, Dict
+from typing import List, Dict, Optional
 import json
-from datetime import datetime, date
+from datetime import datetime, date, timedelta, timezone
 import threading
 from flask_cors import CORS
-from sqlalchemy.exc import TimeoutError
-from flask import jsonify
+from sqlalchemy.exc import TimeoutError, IntegrityError
 from sqlalchemy.orm import joinedload
 import os
 from urllib.parse import quote_plus
 from dotenv import load_dotenv
+from functools import wraps
+import bcrypt
+import jwt as pyjwt
 
 import sys
 sys.stdout.reconfigure(line_buffering=True)
 sys.stderr.reconfigure(line_buffering=True)
 
 load_dotenv()
+
+# Autenticación por token JWT (HS256). El secreto se configura en el .env.
+JWT_SECRET = os.getenv("JWT_SECRET", "")
+JWT_EXPIRACION_HORAS = int(os.getenv("JWT_EXPIRACION_HORAS", "24"))
+
+# Hash bcrypt fijo para igualar el tiempo de respuesta del login cuando el email
+# no existe (evita enumerar cuentas por diferencia de latencia).
+HASH_DUMMY = "$2b$12$HQfoH4HqNYj685Wa9.gVC.KgPIq4DXVGONzq8rIz3oSAtQv9i2dNu"
 
 app = Flask(__name__)
 CORS(app)
@@ -88,6 +97,17 @@ class Conciertos(db.Model):
     # Cantidad de scrapeos completos consecutivos en los que el concierto no apareció.
     # El sync de "ausentes" solo borra cuando misses >= 2 (borrado diferido).
     misses = db.Column(db.Integer, nullable=False, default=0)
+    # Momento en que se insertó el concierto: la base para registrar "novedades"
+    # (conciertos nuevos de artistas seguidos) tras cada scrape completo.
+    creado_en = db.Column(db.DateTime(timezone=True), server_default=db.func.now())
+
+class Usuarios(db.Model):
+    __tablename__ = 'usuarios'
+    id = db.Column(db.Integer, primary_key=True)
+    email = db.Column(db.Text, nullable=False, unique=True)
+    nombre = db.Column(db.Text, nullable=False)
+    password_hash = db.Column(db.Text, nullable=False)
+    creado_en = db.Column(db.DateTime(timezone=True), server_default=db.func.now())
 
 # Región: solo Buenos Aires y alrededores (CABA + GBA + La Plata/Cañuelas).
 AMBA_MIN_LAT = -35.15
@@ -121,6 +141,15 @@ with app.app_context():
         print("Columna 'misses' verificada/creada.")
     except Exception as e:
         print(f"AVISO: no se pudo verificar la columna 'misses': {e}")
+        db.session.rollback()
+    try:
+        # Marca de tiempo de inserción del concierto: clave para detectar
+        # conciertos nuevos tras un scrape (novedades de artistas seguidos).
+        db.session.execute(db.text("ALTER TABLE conciertos ADD COLUMN IF NOT EXISTS creado_en TIMESTAMPTZ NOT NULL DEFAULT now()"))
+        db.session.commit()
+        print("Columna 'creado_en' verificada/creada.")
+    except Exception as e:
+        print(f"AVISO: no se pudo verificar la columna 'creado_en': {e}")
         db.session.rollback()
 
 #rutas
@@ -529,6 +558,163 @@ def estadisticas():
     except Exception as e:
         print(f"Error en /estadisticas: {e}")
         return {"error": str(e)}, 500
+
+# ============================ AUTENTICACIÓN ============================
+# Passwords con bcrypt (+ hash dummy para no revelar emails registrados) y
+# sesión con JWT HS256 que expira a las 24 h. Mismo esquema que BAsónicos.
+
+def hash_password(password: str) -> str:
+    return bcrypt.hashpw(password.encode('utf-8'), bcrypt.gensalt()).decode('utf-8')
+
+
+def verificar_password(password_hash: str, password: str) -> bool:
+    try:
+        return bcrypt.checkpw(password.encode('utf-8'), password_hash.encode('utf-8'))
+    except ValueError:
+        return False
+
+
+def generar_token(usuario_id: int) -> str:
+    ahora = datetime.now(timezone.utc)
+    payload = {
+        "sub": str(usuario_id),
+        "iat": ahora,
+        "exp": ahora + timedelta(hours=JWT_EXPIRACION_HORAS),
+    }
+    return pyjwt.encode(payload, JWT_SECRET, algorithm="HS256")
+
+
+def verificar_token(token: str) -> Optional[int]:
+    try:
+        payload = pyjwt.decode(token, JWT_SECRET, algorithms=["HS256"])
+        return int(payload.get("sub"))
+    except Exception:
+        return None
+
+
+def serializar_usuario(usuario: Usuarios) -> dict:
+    return {
+        "id": usuario.id,
+        "email": usuario.email,
+        "nombre": usuario.nombre,
+        "creado_en": usuario.creado_en.isoformat() if usuario.creado_en else None,
+    }
+
+
+def requiere_auth(f):
+    """Decorador: exige Authorization: Bearer <token> y guarda g.usuario_id."""
+    @wraps(f)
+    def wrapper(*args, **kwargs):
+        header = request.headers.get("Authorization", "")
+        if not header.startswith("Bearer "):
+            return jsonify({"error": "Se requiere autenticación"}), 401
+        token = header.split(" ", 1)[1]
+        usuario_id = verificar_token(token)
+        if usuario_id is None:
+            return jsonify({"error": "Token inválido o expirado"}), 401
+        g.usuario_id = usuario_id
+        return f(*args, **kwargs)
+    return wrapper
+
+
+def normalizar_email(email: str) -> str:
+    return (email or "").strip().lower()
+
+MINS_PASSWORD = 8
+MAX_PASSWORD = 72  # límite de bcrypt (72 bytes)
+
+
+def debilidades_password(password: str) -> List[str]:
+    """Reglas de complejidad que la contraseña no cumple (mismo criterio que BAsónicos)."""
+    if len(password) > MAX_PASSWORD:
+        return [f"no superar los {MAX_PASSWORD} caracteres"]
+    debilidades = []
+    if len(password) < MINS_PASSWORD:
+        debilidades.append(f"tener al menos {MINS_PASSWORD} caracteres")
+    tiene_mayuscula = any(c.isupper() for c in password)
+    tiene_minuscula = any(c.islower() for c in password)
+    tiene_digito = any(c.isdigit() for c in password)
+    tiene_especial = any((not c.isalnum() and not c.isspace()) for c in password)
+    if not tiene_mayuscula:
+        debilidades.append("incluir una letra mayúscula")
+    if not tiene_minuscula:
+        debilidades.append("incluir una letra minúscula")
+    if not tiene_digito:
+        debilidades.append("incluir un número")
+    if not tiene_especial:
+        debilidades.append("incluir un carácter especial")
+    return debilidades
+
+
+def _validar_registro(email: str, nombre: str, password: str) -> str:
+    if "@" not in email or "." not in email:
+        return "Email inválido"
+    if len(email) > 255:
+        return "Email demasiado largo"
+    if not nombre:
+        return "El nombre es obligatorio"
+    if len(nombre) > 80:
+        return "Nombre demasiado largo"
+    debilidades = debilidades_password(password)
+    if debilidades:
+        return "La contraseña debe " + ", ".join(debilidades)
+    return ""
+
+
+@app.route("/registro", methods=["POST"])
+def registro():
+    datos = request.get_json(silent=True) or {}
+    email = normalizar_email(datos.get("email") or "")
+    nombre = (datos.get("nombre") or "").strip()
+    password = datos.get("password") or ""
+
+    mensaje = _validar_registro(email, nombre, password)
+    if mensaje:
+        return jsonify({"error": mensaje}), 400
+
+    if bcrypt and Usuarios.query.filter_by(email=email).first():
+        return jsonify({"error": "Ya existe una cuenta con ese email"}), 409
+
+    usuario = Usuarios(email=email, nombre=nombre, password_hash=hash_password(password))
+    db.session.add(usuario)
+    try:
+        db.session.commit()
+    except IntegrityError:
+        db.session.rollback()
+        return jsonify({"error": "Ya existe una cuenta con ese email"}), 409
+
+    token = generar_token(usuario.id)
+    return jsonify({"token": token, "usuario": serializar_usuario(usuario)}), 201
+
+
+@app.route("/login", methods=["POST"])
+def login():
+    datos = request.get_json(silent=True) or {}
+    email = normalizar_email(datos.get("email") or "")
+    password = datos.get("password") or ""
+
+    usuario = Usuarios.query.filter_by(email=email).first()
+    if not usuario:
+        # Corre bcrypt contra un hash dummy para no revelar si el email existe.
+        verificar_password(HASH_DUMMY, password)
+        return jsonify({"error": "Email o contraseña incorrectos"}), 401
+    if not verificar_password(usuario.password_hash, password):
+        return jsonify({"error": "Email o contraseña incorrectos"}), 401
+
+    token = generar_token(usuario.id)
+    return jsonify({"token": token, "usuario": serializar_usuario(usuario)}), 200
+
+
+@app.route("/me")
+@requiere_auth
+def me():
+    usuario = db.session.get(Usuarios, g.usuario_id)
+    if not usuario:
+        return jsonify({"error": "Usuario no encontrado"}), 404
+    return jsonify(serializar_usuario(usuario))
+
+# ======================================================================
+
 
 def get_coordenadas(location_name):
     """

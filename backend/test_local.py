@@ -10,6 +10,7 @@
 #   python test_local.py scheduler                              # Verifica el hilo programado (intervalo 1 min, con stub)
 #   python test_local.py borrado_diferido                       # Verifica que el sync borra recién a las 2 corridas
 #   python test_local.py coords_null                            # Verifica que venues sin coordenadas no se borran
+#   python test_local.py auth                                   # Registro, login y /me (cuentas de usuario)
 #
 # Antes de importar back.py hay que apagar el scraper automático para que la
 # prueba no lance un scrapeo en background.
@@ -209,6 +210,67 @@ def coords_null():
     print("OK: conciertos/venues sin coordenadas no se borran.")
 
 
+def auth():
+    # Registro, login, /me, validaciones y duplicados. Usa el test client de Flask
+    # (no levanta servidor). Se ataca a una cuenta de prueba única.
+    import uuid
+    cliente = back.app.test_client()
+    email = f"test_{uuid.uuid4().hex[:10]}@prueba.com"
+
+    # Registro exitoso
+    r = cliente.post("/registro", json={"email": email, "nombre": "Usuario Test", "password": "Clave9!secreta"})
+    assert r.status_code == 201, f"registro ok: {r.status_code} {r.get_data(as_text=True)}"
+    datos = r.get_json()
+    assert datos["token"] and datos["usuario"]["email"] == email
+    assert datos["usuario"]["nombre"] == "Usuario Test"
+    print("OK registro: 201 con token y usuario.")
+
+    # Duplicado -> 409
+    r = cliente.post("/registro", json={"email": email.upper(), "nombre": "Otro", "password": "Clave9!secreta"})
+    assert r.status_code == 409, f"duplicado: {r.status_code}"
+    print("OK registro duplicado: 409 (email normaliza a minúsculas).")
+
+    # Password débil -> 400
+    r = cliente.post("/registro", json={"email": "x@x.com", "nombre": "X", "password": "corta"})
+    assert r.status_code == 400, f"password debil: {r.status_code}"
+    assert "La contraseña debe" in r.get_json()["error"]
+    print("OK password débil: 400 con detalle.")
+
+    # Login correcto
+    r = cliente.post("/login", json={"email": email, "password": "Clave9!secreta"})
+    assert r.status_code == 200, f"login ok: {r.status_code} {r.get_data(as_text=True)}"
+    token = r.get_json()["token"]
+    assert token
+    print("OK login: 200 con token.")
+
+    # Login con password incorrecto -> 401
+    r = cliente.post("/login", json={"email": email, "password": "ClaveEquivocada1!"})
+    assert r.status_code == 401
+    print("OK login incorrecto: 401.")
+
+    # Login con email inexistente -> 401 (mismo mensaje genérico)
+    r = cliente.post("/login", json={"email": "no_existe@prueba.com", "password": "Clave9!secreta"})
+    assert r.status_code == 401
+    assert "incorrectos" in r.get_json()["error"]
+    print("OK login email inexistente: 401 genérico.")
+
+    # /me sin token -> 401
+    r = cliente.get("/me")
+    assert r.status_code == 401
+    print("OK /me sin token: 401.")
+
+    # /me con token -> perfil
+    r = cliente.get("/me", headers={"Authorization": f"Bearer {token}"})
+    assert r.status_code == 200, f"/me: {r.status_code}"
+    assert r.get_json()["id"] == datos["usuario"]["id"]
+    print("OK /me con token: perfil correcto.")
+
+    # /me con token corrupto -> 401
+    r = cliente.get("/me", headers={"Authorization": "Bearer token-invalido"})
+    assert r.status_code == 401
+    print("OK /me token inválido: 401.")
+
+
 if __name__ == "__main__":
     sys.argv = sys.argv[1:] or ["verify"]
     {
@@ -219,4 +281,5 @@ if __name__ == "__main__":
         "scheduler": scheduler,
         "borrado_diferido": borrado_diferido,
         "coords_null": coords_null,
+        "auth": auth,
     }[sys.argv[0]]()
