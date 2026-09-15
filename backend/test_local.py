@@ -11,6 +11,7 @@
 #   python test_local.py borrado_diferido                       # Verifica que el sync borra recién a las 2 corridas
 #   python test_local.py coords_null                            # Verifica que venues sin coordenadas no se borran
 #   python test_local.py auth                                   # Registro, login y /me (cuentas de usuario)
+#   python test_local.py favoritos                              # Like/quitar conciertos (no destructivo)
 #
 # Antes de importar back.py hay que apagar el scraper automático para que la
 # prueba no lance un scrapeo en background.
@@ -271,6 +272,85 @@ def auth():
     print("OK /me token inválido: 401.")
 
 
+def favoritos():
+    # Like (favorito) de conciertos: agregar, listar, duplicado idempotente,
+    # 404 si el concierto no existe y quitar. Crea datos de prueba y los limpia
+    # al final (no destructivo).
+    import uuid
+    cliente = back.app.test_client()
+    email = f"fav_{uuid.uuid4().hex[:12]}@prueba.com"
+
+    with back.app.app_context():
+        # Concierto de prueba (fecha futura, dentro de AMBA para no ser borrado vivo).
+        punto = back.WKTElement("POINT(-58.3816 -34.6037)", srid=4326)
+        venue = back.Ubicaciones(nombre="Venue Favoritos Test", capacidad_total=0, coordenadas=punto)
+        back.db.session.add(venue)
+        back.db.session.commit()
+        concierto = back.Conciertos(
+            nombre="Show Favoritos Test", artista="Artista Fav Test", url_evento="https://e.com/fav",
+            ubicacion=venue.id, fecha=date.today() + timedelta(days=90),
+            hora=datetime.strptime("21:00", "%H:%M").time())
+        back.db.session.add(concierto)
+        back.db.session.commit()
+        concierto_id = concierto.id
+
+    try:
+        r = cliente.post("/registro", json={"email": email, "nombre": "Fav Test", "password": "Clave9!secreta"})
+        assert r.status_code == 201, r.get_data(as_text=True)
+        token = r.get_json()["token"]
+
+        # Sin token -> 401
+        r = cliente.get("/favoritos")
+        assert r.status_code == 401
+        print("OK favoritos sin token: 401.")
+
+        h = {"Authorization": f"Bearer {token}"}
+
+        r = cliente.post(f"/favoritos/{concierto_id}", headers=h)
+        assert r.status_code == 201, r.get_data(as_text=True)
+        print("OK favorito agregado: 201.")
+
+        # Idempotente
+        r = cliente.post(f"/favoritos/{concierto_id}", headers=h)
+        assert r.status_code == 201, r.get_data(as_text=True)
+        print("OK favorito duplicado: 201 idempotente.")
+
+        r = cliente.get("/favoritos", headers=h)
+        assert r.status_code == 200
+        lista = r.get_json()["favoritos"]
+        assert any(c["id"] == concierto_id for c in lista), "no aparece el favorito"
+        assert lista[0]["artista"] == "Artista Fav Test"
+        print(f"OK listar favoritos: {len(lista)} favorito(s) con shape correcto.")
+
+        r = cliente.post("/favoritos/99999999", headers=h)
+        assert r.status_code == 404
+        print("OK favorito concierto inexistente: 404.")
+
+        r = cliente.delete(f"/favoritos/{concierto_id}", headers=h)
+        assert r.status_code == 204, r.get_data(as_text=True)
+        print("OK quitar favorito: 204.")
+
+        r = cliente.get("/favoritos", headers=h)
+        assert not any(c["id"] == concierto_id for c in r.get_json()["favoritos"])
+        print("OK favoritos vacíos tras quitar.")
+
+        # Quitar de nuevo: idempotente
+        r = cliente.delete(f"/favoritos/{concierto_id}", headers=h)
+        assert r.status_code == 204
+        print("OK quitar favorito ausente: 204 idempotente.")
+    finally:
+        with back.app.app_context():
+            back.db.session.execute(back.db.text(
+                "DELETE FROM favoritos WHERE usuario_id = (SELECT id FROM usuarios WHERE email = :em)"), {"em": email})
+            back.db.session.execute(back.db.text("DELETE FROM usuarios WHERE email = :em"), {"em": email})
+            back.db.session.execute(back.db.text(
+                "DELETE FROM conciertos WHERE id = :cid"), {"cid": concierto_id})
+            back.db.session.execute(back.db.text(
+                "DELETE FROM ubicaciones WHERE nombre = 'Venue Favoritos Test'"))
+            back.db.session.commit()
+    print("Limpieza completa.")
+
+
 if __name__ == "__main__":
     sys.argv = sys.argv[1:] or ["verify"]
     {
@@ -282,4 +362,5 @@ if __name__ == "__main__":
         "borrado_diferido": borrado_diferido,
         "coords_null": coords_null,
         "auth": auth,
+        "favoritos": favoritos,
     }[sys.argv[0]]()
