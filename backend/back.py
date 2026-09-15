@@ -109,6 +109,12 @@ class Usuarios(db.Model):
     password_hash = db.Column(db.Text, nullable=False)
     creado_en = db.Column(db.DateTime(timezone=True), server_default=db.func.now())
 
+class Favoritos(db.Model):
+    __tablename__ = 'favoritos'
+    usuario_id = db.Column(db.Integer, db.ForeignKey('usuarios.id', ondelete='CASCADE'), primary_key=True)
+    concierto_id = db.Column(db.Integer, db.ForeignKey('conciertos.id', ondelete='CASCADE'), primary_key=True)
+    creado_en = db.Column(db.DateTime(timezone=True), server_default=db.func.now())
+
 # Región: solo Buenos Aires y alrededores (CABA + GBA + La Plata/Cañuelas).
 AMBA_MIN_LAT = -35.15
 AMBA_MAX_LAT = -34.2
@@ -181,33 +187,37 @@ def get_ubicaciones():
         ]
     }
 
+# Serialización compartida de un concierto (mismo shape en /conciertos,
+# /conciertos_cerca, /favoritos y /novedades).
+def serializar_concierto(concierto):
+    return {
+        "id": concierto.id,
+        "nombre": concierto.nombre,
+        "artista": concierto.artista,
+        "url_evento": concierto.url_evento,
+        "ubicacion": concierto.ubicacion,
+        "isAgotado": concierto.isagotado,
+        "isAptoMenores": concierto.isaptomenores,
+        "fecha": str(concierto.fecha) if concierto.fecha else None,
+        "hora": str(concierto.hora) if concierto.hora else None,
+        "ubicacion_detalle": {
+            "id": concierto.ubicacion_ref.id if concierto.ubicacion_ref else None,
+            "nombre": concierto.ubicacion_ref.nombre if concierto.ubicacion_ref else None,
+            "capacidad_total": concierto.ubicacion_ref.capacidad_total if concierto.ubicacion_ref else None,
+            "coordenadas": (
+                [to_shape(concierto.ubicacion_ref.coordenadas).x, to_shape(concierto.ubicacion_ref.coordenadas).y]
+                if concierto.ubicacion_ref and concierto.ubicacion_ref.coordenadas else None
+            ),
+            "url_maps": concierto.ubicacion_ref.url_maps if concierto.ubicacion_ref else None
+        }
+    }
+
+
 @app.route("/conciertos")
 def get_conciertos():
     conciertos = Conciertos.query.all()
     return {
-        "conciertos": [
-            {
-                "id": concierto.id,
-                "nombre": concierto.nombre,
-                "artista": concierto.artista,
-                "url_evento": concierto.url_evento,
-                "ubicacion": concierto.ubicacion,
-                "isAgotado": concierto.isagotado,
-                "isAptoMenores": concierto.isaptomenores,
-                "fecha": str(concierto.fecha),
-                "hora": str(concierto.hora),
-                "ubicacion_detalle": {
-                    "id": concierto.ubicacion_ref.id if concierto.ubicacion_ref else None,
-                    "nombre": concierto.ubicacion_ref.nombre if concierto.ubicacion_ref else None,
-                    "capacidad_total": concierto.ubicacion_ref.capacidad_total if concierto.ubicacion_ref else None,
-                    "coordenadas": (
-                        [to_shape(concierto.ubicacion_ref.coordenadas).x, to_shape(concierto.ubicacion_ref.coordenadas).y]
-                        if concierto.ubicacion_ref and concierto.ubicacion_ref.coordenadas else None
-                    ),
-                    "url_maps": concierto.ubicacion_ref.url_maps if concierto.ubicacion_ref else None
-                }
-            } for concierto in conciertos
-        ]
+        "conciertos": [serializar_concierto(c) for c in conciertos]
     }
 
 #ejemplo query desde parque rivadavia /conciertos_cerca?lng=-34.61830362159788&lat=-58.433900393162745&km=10
@@ -240,29 +250,7 @@ def get_conciertos_cerca():
 
         # Serializar DENTRO del try, mientras la sesión está activa
         resultado = {
-            "conciertos": [
-                {
-                    "id": concierto.id,
-                    "nombre": concierto.nombre,
-                    "artista": concierto.artista,
-                    "url_evento": concierto.url_evento,
-                    "ubicacion": concierto.ubicacion,
-                    "isAgotado": concierto.isagotado,
-                    "isAptoMenores": concierto.isaptomenores,
-                    "fecha": str(concierto.fecha),
-                    "hora": str(concierto.hora),
-                    "ubicacion_detalle": {
-                        "id": concierto.ubicacion_ref.id if concierto.ubicacion_ref else None,
-                        "nombre": concierto.ubicacion_ref.nombre if concierto.ubicacion_ref else None,
-                        "capacidad_total": concierto.ubicacion_ref.capacidad_total if concierto.ubicacion_ref else None,
-                        "coordenadas": (
-                            [to_shape(concierto.ubicacion_ref.coordenadas).x, to_shape(concierto.ubicacion_ref.coordenadas).y]
-                            if concierto.ubicacion_ref and concierto.ubicacion_ref.coordenadas else None
-                        ),
-                        "url_maps": concierto.ubicacion_ref.url_maps if concierto.ubicacion_ref else None
-                    }
-                } for concierto in conciertos
-            ]
+            "conciertos": [serializar_concierto(concierto) for concierto in conciertos]
         }
         
         return resultado
@@ -712,6 +700,41 @@ def me():
     if not usuario:
         return jsonify({"error": "Usuario no encontrado"}), 404
     return jsonify(serializar_usuario(usuario))
+
+
+# ============================ FAVORITOS ============================
+@app.route("/favoritos")
+@requiere_auth
+def get_favoritos():
+    filas = (
+        db.session.query(Conciertos)
+        .join(Favoritos, Favoritos.concierto_id == Conciertos.id)
+        .filter(Favoritos.usuario_id == g.usuario_id)
+        .order_by(Favoritos.creado_en.desc(), Conciertos.id.desc())
+        .all()
+    )
+    return jsonify({"favoritos": [serializar_concierto(c) for c in filas]})
+
+
+@app.route("/favoritos/<int:concierto_id>", methods=["POST"])
+@requiere_auth
+def post_favorito(concierto_id):
+    if not db.session.get(Conciertos, concierto_id):
+        return jsonify({"error": "El concierto no existe"}), 404
+    db.session.add(Favoritos(usuario_id=g.usuario_id, concierto_id=concierto_id))
+    try:
+        db.session.commit()
+    except IntegrityError:
+        db.session.rollback()  # ya es favorito: idempotente
+    return jsonify({"exito": True}), 201
+
+
+@app.route("/favoritos/<int:concierto_id>", methods=["DELETE"])
+@requiere_auth
+def delete_favorito(concierto_id):
+    Favoritos.query.filter_by(usuario_id=g.usuario_id, concierto_id=concierto_id).delete()
+    db.session.commit()
+    return "", 204
 
 # ======================================================================
 
