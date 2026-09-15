@@ -40,6 +40,11 @@ function Encabezado() {
       </Link>
 
       <div className={styles.acciones}>
+        {autenticado && (
+          <Link to="/favoritos" className={styles.enlaceSecundario}>
+            Favoritos
+          </Link>
+        )}
         {autenticado ? (
           <span className={styles.usuario}>{usuario?.nombre}</span>
         ) : (

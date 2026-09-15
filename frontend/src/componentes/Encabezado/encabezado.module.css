@@ -102,6 +102,24 @@
   transition: background-color var(--transition-base), transform var(--transition-fast);
 }
 
+.enlaceSecundario {
+  padding: var(--space-2) var(--space-4);
+  border-radius: var(--radius-full);
+  border: 1px solid var(--color-border);
+  background-color: var(--color-surface);
+  color: var(--color-text);
+  font-size: var(--text-sm);
+  font-weight: var(--font-semibold);
+  text-decoration: none;
+  white-space: nowrap;
+  transition: background-color var(--transition-base), border-color var(--transition-base);
+}
+
+.enlaceSecundario:hover {
+  background-color: var(--color-bg-subtle);
+  border-color: var(--color-text-tertiary);
+}
+
 .enlaceAccion:hover {
   background-color: var(--color-accent-hover);
 }
