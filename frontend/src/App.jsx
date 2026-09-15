@@ -1,8 +1,17 @@
 import React from "react";
-import Inicio from "./paginas/Inicio.jsx"; // asegúrate de que coincida exactamente
+import { Routes, Route } from "react-router-dom";
+import Inicio from "./paginas/Inicio.jsx";
+import Login from "./paginas/Login.jsx";
+import Registro from "./paginas/Registro.jsx";
 
 function App() {
-  return <Inicio />;
+  return (
+    <Routes>
+      <Route path="/" element={<Inicio />} />
+      <Route path="/login" element={<Login />} />
+      <Route path="/registro" element={<Registro />} />
+    </Routes>
+  );
 }
 
 export default App;

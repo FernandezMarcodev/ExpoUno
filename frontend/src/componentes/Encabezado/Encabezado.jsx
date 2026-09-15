@@ -1,9 +1,12 @@
 import styles from "./encabezado.module.css";
 import { useState, useEffect } from "react";
-import { FaSun, FaMoon } from "react-icons/fa";
+import { FaSun, FaMoon, FaSignOutAlt } from "react-icons/fa";
+import { Link } from "react-router-dom";
+import { useAuth } from "../../contextos/AuthContext";
 
 function Encabezado() {
   const [modoOscuro, setModoOscuro] = useState(false);
+  const { usuario, autenticado, cerrarSesion } = useAuth();
 
   useEffect(() => {
     const temaGuardado = localStorage.getItem("tema");
@@ -25,24 +28,48 @@ function Encabezado() {
     }
   }
 
+  function cerrar() {
+    cerrarSesion();
+  }
+
   return (
     <header className={styles.encabezado}>
-      <div className={styles.marca}>
+      <Link to="/" className={styles.marca}>
         <img src="/logo.png" alt="" className={styles.logoMarca} aria-hidden="true" />
         <h1 className={styles.tituloMarca}>Concierto Finder</h1>
-      </div>
-      <button
-        className={styles.temaToggle}
-        onClick={cambiarTema}
-        aria-label={modoOscuro ? "Cambiar a modo claro" : "Cambiar a modo oscuro"}
-        title={modoOscuro ? "Cambiar a modo claro" : "Cambiar a modo oscuro"}
-      >
-        {modoOscuro ? (
-          <FaSun className={styles.iconoTema} />
+      </Link>
+
+      <div className={styles.acciones}>
+        {autenticado ? (
+          <span className={styles.usuario}>{usuario?.nombre}</span>
         ) : (
-          <FaMoon className={styles.iconoTema} />
+          <Link to="/login" className={styles.enlaceAccion}>
+            Iniciar sesión
+          </Link>
         )}
-      </button>
+        <button
+          className={styles.temaToggle}
+          onClick={cambiarTema}
+          aria-label={modoOscuro ? "Cambiar a modo claro" : "Cambiar a modo oscuro"}
+          title={modoOscuro ? "Cambiar a modo claro" : "Cambiar a modo oscuro"}
+        >
+          {modoOscuro ? (
+            <FaSun className={styles.iconoTema} />
+          ) : (
+            <FaMoon className={styles.iconoTema} />
+          )}
+        </button>
+        {autenticado && (
+          <button
+            className={styles.temaToggle}
+            onClick={cerrar}
+            aria-label="Cerrar sesión"
+            title="Cerrar sesión"
+          >
+            <FaSignOutAlt className={styles.iconoTema} />
+          </button>
+        )}
+      </div>
     </header>
   );
 }
