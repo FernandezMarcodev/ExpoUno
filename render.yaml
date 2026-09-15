@@ -24,6 +24,14 @@ services:
         value: require
       - key: SCRAPER_INTERVALO_MINUTOS
         value: "1440"
+      - key: JWT_SECRET
+        sync: false
+      - key: VAPID_PUBLIC_KEY
+        sync: false
+      - key: VAPID_PRIVATE_KEY
+        sync: false
+      - key: VAPID_SUBJECT
+        value: "mailto:expouno@example.com"
 
   # Frontend (React + Vite) como sitio estático servido por CDN.
   - type: web
@@ -39,3 +47,9 @@ services:
       - path: /assets/*
         name: Cache-Control
         value: "public, max-age=31536000, immutable"
+      - path: /sw.js
+        name: Cache-Control
+        value: "no-cache, max-age=0"
+      - path: /manifest.webmanifest
+        name: Cache-Control
+        value: "no-cache, max-age=0"
