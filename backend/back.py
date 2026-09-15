@@ -21,6 +21,7 @@ from dotenv import load_dotenv
 from functools import wraps
 import bcrypt
 import jwt as pyjwt
+from pywebpush import webpush, WebPushException
 
 import sys
 sys.stdout.reconfigure(line_buffering=True)
@@ -31,6 +32,11 @@ load_dotenv()
 # Autenticación por token JWT (HS256). El secreto se configura en el .env.
 JWT_SECRET = os.getenv("JWT_SECRET", "")
 JWT_EXPIRACION_HORAS = int(os.getenv("JWT_EXPIRACION_HORAS", "24"))
+# Claves Web Push (VAPID) para notificaciones push del navegador. Se generan con
+# backend/generar_vapid.py. Si no están configuradas, el push simplemente se omite.
+VAPID_PUBLIC_KEY = os.getenv("VAPID_PUBLIC_KEY", "")
+VAPID_PRIVATE_KEY = os.getenv("VAPID_PRIVATE_KEY", "")
+VAPID_SUBJECT = os.getenv("VAPID_SUBJECT", "")
 
 # Hash bcrypt fijo para igualar el tiempo de respuesta del login cuando el email
 # no existe (evita enumerar cuentas por diferencia de latencia).
@@ -131,6 +137,15 @@ class Notificaciones(db.Model):
     leida = db.Column(db.Boolean, nullable=False, default=False, server_default=db.text("false"))
     creado_en = db.Column(db.DateTime(timezone=True), server_default=db.func.now())
     __table_args__ = (db.UniqueConstraint('usuario_id', 'concierto_id', name='uq_notificaciones_usuario_concierto'),)
+
+class SuscripcionesPush(db.Model):
+    __tablename__ = 'suscripciones_push'
+    id = db.Column(db.Integer, primary_key=True)
+    usuario_id = db.Column(db.Integer, db.ForeignKey('usuarios.id', ondelete='CASCADE'), nullable=False)
+    endpoint = db.Column(db.Text, unique=True, nullable=False)
+    clave_publica = db.Column(db.Text, nullable=False)
+    autenticacion = db.Column(db.Text, nullable=False)
+    creado_en = db.Column(db.DateTime(timezone=True), server_default=db.func.now())
 
 # Región: solo Buenos Aires y alrededores (CABA + GBA + La Plata/Cañuelas).
 AMBA_MIN_LAT = -35.15
@@ -525,10 +540,13 @@ def _ejecutar_scrapeo() -> List[Dict]:
                 eliminar_conciertos_ausentes(claves_vigentes)
             else:
                 print("Sync: sin claves vigentes (scrapeo sin datos parseados), no se sincroniza.")
-            # Conciertos nuevos de artistas seguidos -> notificaciones.
+            # Conciertos nuevos de artistas seguidos -> notificaciones + push.
             n = registrar_novedades(desde)
             if n:
                 print(f"Novedades registradas tras scrapeo: {n}")
+                enviados = enviar_push_novedades(desde)
+                if enviados:
+                    print(f"Push enviados tras scrapeo: {enviados}")
         else:
             print("Sync de ausentes omitido (scrapeo incompleto o sin datos suficientes).")
 
@@ -863,6 +881,111 @@ def marcar_todas_novedades_leidas():
     Notificaciones.query.filter_by(usuario_id=g.usuario_id, leida=False).update({"leida": True})
     db.session.commit()
     return jsonify({"exito": True})
+
+
+# ============================ PUSH ============================
+@app.route("/clave_vapid")
+def get_clave_vapid():
+    if not VAPID_PUBLIC_KEY:
+        return jsonify({"error": "Push no configurado"}), 503
+    return jsonify({"clave_vapid": VAPID_PUBLIC_KEY})
+
+
+@app.route("/suscripcion_push", methods=["POST"])
+@requiere_auth
+def post_suscripcion_push():
+    datos = request.get_json(silent=True) or {}
+    endpoint = (datos.get("endpoint") or "").strip()
+    clave_publica = (datos.get("clave_publica") or "").strip()  # p256dh
+    autenticacion = (datos.get("autenticacion") or "").strip()  # auth
+    if not endpoint or not clave_publica or not autenticacion:
+        return jsonify({"error": "endpoint, clave_publica y autenticacion son obligatorios"}), 400
+
+    existente = SuscripcionesPush.query.filter_by(endpoint=endpoint).first()
+    if existente:
+        existente.usuario_id = g.usuario_id
+        existente.clave_publica = clave_publica
+        existente.autenticacion = autenticacion
+        db.session.commit()
+        return jsonify({"exito": True}), 201
+
+    db.session.add(SuscripcionesPush(
+        usuario_id=g.usuario_id, endpoint=endpoint,
+        clave_publica=clave_publica, autenticacion=autenticacion))
+    db.session.commit()
+    return jsonify({"exito": True}), 201
+
+
+@app.route("/suscripcion_push", methods=["DELETE"])
+@requiere_auth
+def delete_suscripcion_push():
+    datos = request.get_json(silent=True) or {}
+    endpoint = (datos.get("endpoint") or "").strip()
+    if not endpoint:
+        return jsonify({"error": "endpoint es obligatorio"}), 400
+    SuscripcionesPush.query.filter_by(usuario_id=g.usuario_id, endpoint=endpoint).delete()
+    db.session.commit()
+    return "", 204
+
+
+def _enviar_push(usuario_id, titulo, cuerpo, url) -> int:
+    if not (VAPID_PRIVATE_KEY and VAPID_SUBJECT):
+        return 0
+    suscripciones = SuscripcionesPush.query.filter_by(usuario_id=usuario_id).all()
+    enviados = 0
+    for s in suscripciones:
+        try:
+            webpush(
+                subscription_info={
+                    "endpoint": s.endpoint,
+                    "keys": {"p256dh": s.clave_publica, "auth": s.autenticacion},
+                },
+                data=json.dumps({"title": titulo, "body": cuerpo, "url": url}, ensure_ascii=False),
+                vapid_private_key=VAPID_PRIVATE_KEY,
+                vapid_claims={"sub": VAPID_SUBJECT},
+                timeout=10,
+            )
+            enviados += 1
+        except WebPushException as e:
+            if e.response is not None and e.response.status_code in (404, 410):
+                print(f"Push: endpoint inválido, se elimina la suscripción ({e.response.status_code}).")
+                db.session.delete(s)
+                db.session.commit()
+            else:
+                print(f"Push: error al enviar a {s.endpoint[:60]}...: {e}")
+        except Exception as e:
+            print(f"Push: error inesperado a {s.endpoint[:60]}...: {e}")
+    return enviados
+
+
+def enviar_push_novedades(desde: datetime) -> int:
+    """Envía push a los usuarios con suscripción que tienen novedades sin leer
+    de conciertos creados desde <desde> (los nuevos del scrape)."""
+    try:
+        filas = (
+            db.session.query(Notificaciones, Conciertos)
+            .join(Conciertos, Conciertos.id == Notificaciones.concierto_id)
+            .filter(
+                Notificaciones.leida == False,
+                Conciertos.creado_en >= desde,
+                Notificaciones.usuario_id.in_(
+                    db.session.query(SuscripcionesPush.usuario_id).distinct()))
+            .all()
+        )
+        total = 0
+        for notif, concierto in filas:
+            fecha = str(concierto.fecha) if concierto.fecha else ""
+            cuerpo = f"{concierto.nombre} - {fecha}".strip(" -")
+            total += _enviar_push(
+                notif.usuario_id,
+                f"Nuevo show de {concierto.artista}",
+                cuerpo,
+                concierto.url_evento or "")
+        return total
+    except Exception as e:
+        print(f"Push: error al procesar novedades: {e}")
+        db.session.rollback()
+        return 0
 
 # ======================================================================
 

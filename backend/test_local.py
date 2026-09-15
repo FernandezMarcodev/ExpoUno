@@ -13,6 +13,7 @@
 #   python test_local.py auth                                   # Registro, login y /me (cuentas de usuario)
 #   python test_local.py favoritos                              # Like/quitar conciertos (no destructivo)
 #   python test_local.py seguidos_novedades                     # Seguir artistas + novedades (no destructivo)
+#   python test_local.py push                                    # Suscripción push + clave VAPID (no destructivo)
 #
 # Antes de importar back.py hay que apagar el scraper automático para que la
 # prueba no lance un scrapeo en background.
@@ -469,6 +470,62 @@ def seguidos_novedades():
     print("Limpieza completa.")
 
 
+def push():
+    # Clave VAPID pública y alta/baja de suscripción push (no envía push real).
+    import uuid
+    cliente = back.app.test_client()
+    email = f"push_{uuid.uuid4().hex[:12]}@prueba.com"
+    endpoint = f"https://x.example.com/push/{uuid.uuid4().hex}"
+
+    r = cliente.get("/clave_vapid")
+    assert r.status_code == 200, r.get_data(as_text=True)
+    assert r.get_json()["clave_vapid"]
+    print("OK clave_vapid pública expuesta.")
+
+    r = cliente.post("/suscripcion_push", json={
+        "endpoint": endpoint, "clave_publica": "AAA", "autenticacion": "BBB"})
+    assert r.status_code == 401
+    print("OK suscripción sin token: 401.")
+
+    r = cliente.post("/registro", json={"email": email, "nombre": "Push Test", "password": "Clave9!secreta"})
+    assert r.status_code == 201, r.get_data(as_text=True)
+    token = r.get_json()["token"]
+    h = {"Authorization": f"Bearer {token}"}
+
+    r = cliente.post("/suscripcion_push", headers=h, json={
+        "endpoint": endpoint, "clave_publica": "AAA", "autenticacion": "BBB"})
+    assert r.status_code == 201, r.get_data(as_text=True)
+    print("OK suscripción creada: 201.")
+
+    r = cliente.post("/suscripcion_push", headers=h, json={
+        "endpoint": endpoint, "clave_publica": "AAA", "autenticacion": "BBB"})
+    assert r.status_code == 201
+    print("OK suscripción duplicada: 201 idempotente.")
+
+    r = cliente.post("/suscripcion_push", headers=h, json={"endpoint": ""})
+    assert r.status_code == 400
+    print("OK suscripción con datos incompletos: 400.")
+
+    with back.app.app_context():
+        n = back.enviar_push_novedades(back.datetime.now(back.timezone.utc))
+        assert n == 0, f"enviar_push devolvió {n} sin novedades"
+    print("OK enviar_push no envía con desde-futuro (0).")
+
+    r = cliente.delete("/suscripcion_push", headers=h, json={"endpoint": endpoint})
+    assert r.status_code == 204, r.get_data(as_text=True)
+    print("OK suscripción eliminada: 204.")
+
+    r = cliente.delete("/suscripcion_push", headers=h, json={"endpoint": endpoint})
+    assert r.status_code == 204
+    print("OK eliminar suscripción ausente: 204 idempotente.")
+
+    with back.app.app_context():
+        back.db.session.execute(back.db.text("DELETE FROM usuarios WHERE email = :em"), {"em": email})
+        back.db.session.execute(back.db.text("DELETE FROM suscripciones_push WHERE endpoint = :ep"), {"ep": endpoint})
+        back.db.session.commit()
+    print("Limpieza completa.")
+
+
 if __name__ == "__main__":
     sys.argv = sys.argv[1:] or ["verify"]
     {
@@ -482,4 +539,5 @@ if __name__ == "__main__":
         "auth": auth,
         "favoritos": favoritos,
         "seguidos_novedades": seguidos_novedades,
+        "push": push,
     }[sys.argv[0]]()
