@@ -59,6 +59,10 @@ db = SQLAlchemy(app)
 
 cantidad_conexiones = 0
 
+# Serializa las ejecuciones del scraper (manual + programado) para evitar
+# que dos corridas concurrentes inserten/borren al mismo tiempo.
+_lock_scrapeo = threading.Lock()
+
 #modelos de tablas
 class Ubicaciones(db.Model):
     __tablename__ = 'ubicaciones'
@@ -81,6 +85,9 @@ class Conciertos(db.Model):
     isaptomenores = db.Column(BOOLEAN, default=False)
     fecha = db.Column(DATE)
     hora = db.Column(TIME)
+    # Cantidad de scrapeos completos consecutivos en los que el concierto no apareció.
+    # El sync de "ausentes" solo borra cuando misses >= 2 (borrado diferido).
+    misses = db.Column(db.Integer, nullable=False, default=0)
 
 # Región: solo Buenos Aires y alrededores (CABA + GBA + La Plata/Cañuelas).
 AMBA_MIN_LAT = -35.15
@@ -105,6 +112,15 @@ with app.app_context():
         print("Tablas verificadas/creadas correctamente.")
     except Exception as e:
         print(f"AVISO: no se pudieron crear/verificar las tablas: {e}")
+        db.session.rollback()
+    try:
+        # db.create_all() no altera tablas existentes: se agrega la columna
+        # de borrado diferido ("misses") si la instancia ya tiene la tabla.
+        db.session.execute(db.text("ALTER TABLE conciertos ADD COLUMN IF NOT EXISTS misses INTEGER NOT NULL DEFAULT 0"))
+        db.session.commit()
+        print("Columna 'misses' verificada/creada.")
+    except Exception as e:
+        print(f"AVISO: no se pudo verificar la columna 'misses': {e}")
         db.session.rollback()
 
 #rutas
@@ -234,6 +250,16 @@ def get_conciertos_cerca():
 
 # funcion de scrapeo
 def ejecutar_scrapeo() -> List[Dict]:
+    if not _lock_scrapeo.acquire(blocking=False):
+        print("Scrapeo ya en ejecución por otro hilo — se omite esta corrida.")
+        return []
+    try:
+        return _ejecutar_scrapeo()
+    finally:
+        _lock_scrapeo.release()
+
+
+def _ejecutar_scrapeo() -> List[Dict]:
     url = "https://www.agendade.com.ar/agenda?deb54158_page="
     conciertos = []
     headers = {
@@ -243,6 +269,10 @@ def ejecutar_scrapeo() -> List[Dict]:
         claves_vigentes = set()
         max_paginas = 60
         page = 1
+        # Un scrapeo "completo" llegó al final real del listado sin cortes,
+        # errores masivos ni tope de paginación. Solo así se sincroniza "ausentes".
+        scrape_completo = True
+        items_erroneos = 0
         while True:
             url_base = f"{url}{page}"
             print("procesando pagina "+str(url_base))
@@ -254,10 +284,13 @@ def ejecutar_scrapeo() -> List[Dict]:
                 'fs-cmsfilter-element': 'list'
             })
             if not lista_conciertos:
-                print("Sin lista de conciertos, se detiene la paginación.")
+                scrape_completo = False
+                print("Sin lista de conciertos, se detiene la paginación (posible cambio/bloqueo del sitio).")
                 break
             items = lista_conciertos.find_all('div', {'role': 'listitem'})
             if not items:
+                if page == 1:
+                    scrape_completo = False
                 print("Página sin conciertos, se detiene la paginación.")
                 break
             for idx, item in enumerate(items, 1):
@@ -318,6 +351,7 @@ def ejecutar_scrapeo() -> List[Dict]:
                     print("concierto de "+nombre_evento)
                     conciertos.append(concierto_info)
                 except Exception as e:
+                    items_erroneos += 1
                     print(f"Error procesando concierto {idx}: {str(e)}")
                     continue
 
@@ -416,8 +450,15 @@ def ejecutar_scrapeo() -> List[Dict]:
 
             page += 1
             if page > max_paginas:
-                print("Se alcanzó el tope de paginación, se detiene.")
+                scrape_completo = False
+                print("Se alcanzó el tope de paginación, se detiene (posibles conciertos en páginas posteriores).")
                 break
+
+        # Tasa de errores por ítem: si es alta, el scrapeo probablemente fue parcial
+        # (rate-limit, bloqueo o cambio de HTML) y no es seguro sincronizar ausentes.
+        if conciertos and (items_erroneos / len(conciertos)) > 0.3:
+            scrape_completo = False
+            print(f"AVISO: {items_erroneos} errores sobre {len(conciertos)} conciertos — scrapeo marcado como incompleto.")
 
         print(f"\n{'='*50}")
         print(f"Total de conciertos extraídos: {len(conciertos)}")
@@ -428,11 +469,19 @@ def ejecutar_scrapeo() -> List[Dict]:
         eliminar_fuera_de_amba()
         fusionar_ubicaciones()
         eliminar_duplicados()
-        if conciertos:
-            eliminar_conciertos_ausentes(claves_vigentes)
-        
+
+        if scrape_completo and len(conciertos) >= 10:
+            if claves_vigentes:
+                eliminar_conciertos_ausentes(claves_vigentes)
+            else:
+                print("Sync: sin claves vigentes (scrapeo sin datos parseados), no se sincroniza.")
+        else:
+            print("Sync de ausentes omitido (scrapeo incompleto o sin datos suficientes).")
+
     except Exception as e:
         print(f"Error al obtener la página principal: {str(e)}")
+        # Sin sync en corridas fallidas: la base queda intacta hasta el próximo scrape completo.
+        print("Sync de ausentes omitido (error durante el scrapeo).")
     
     return conciertos
 
@@ -445,6 +494,41 @@ def scrape_conciertos() -> List[Dict]:
 def limpiar_conciertos_pasados():
     eliminados = eliminar_conciertos_pasados()
     return jsonify({"eliminados": eliminados, "mensaje": f"{eliminados} conciertos pasados eliminados"})
+
+@app.route("/estadisticas")
+def estadisticas():
+    try:
+        hoy = date.today()
+        total = Conciertos.query.count()
+        con_misses = Conciertos.query.filter(Conciertos.misses > 0).count()
+        ausentes_pendientes = Conciertos.query.filter(Conciertos.misses >= 2).count()
+        con_fecha_nula = Conciertos.query.filter(Conciertos.fecha.is_(None)).count()
+        con_hora_nula = Conciertos.query.filter(Conciertos.hora.is_(None)).count()
+        proximos = Conciertos.query.filter(Conciertos.fecha.isnot(None), Conciertos.fecha >= hoy).count()
+        pasados = Conciertos.query.filter(Conciertos.fecha.isnot(None), Conciertos.fecha < hoy).count()
+        ultimos = Conciertos.query.order_by(Conciertos.id.desc()).limit(10).all()
+        return jsonify({
+            "total_conciertos": total,
+            "con_misses": con_misses,
+            "ausentes_pendientes_2_corridas": ausentes_pendientes,
+            "fecha_nula": con_fecha_nula,
+            "hora_nula": con_hora_nula,
+            "proximos": proximos,
+            "pasados": pasados,
+            "ultimos_10": [
+                {
+                    "id": c.id,
+                    "artista": c.artista,
+                    "fecha": str(c.fecha),
+                    "hora": str(c.hora),
+                    "misses": c.misses,
+                    "ubicacion": c.ubicacion_ref.nombre if c.ubicacion_ref else None,
+                } for c in ultimos
+            ]
+        })
+    except Exception as e:
+        print(f"Error en /estadisticas: {e}")
+        return {"error": str(e)}, 500
 
 def get_coordenadas(location_name):
     """
@@ -535,7 +619,12 @@ def eliminar_fuera_de_amba():
                     punto = to_shape(c.ubicacion_ref.coordenadas)
                 except Exception:
                     punto = None
-            if punto is None or not en_amba(punto.x, punto.y):
+            if punto is None:
+                # Sin coordenadas no se puede asegurar que esté fuera de AMBA:
+                # se conserva el concierto y se registra para investigar.
+                print(f"AVISO: '{c.artista}' tiene venue sin coordenadas (#{c.ubicacion}) — no se elimina.")
+                continue
+            if not en_amba(punto.x, punto.y):
                 a_eliminar.append(c.id)
         eliminados = 0
         if a_eliminar:
@@ -557,7 +646,10 @@ def eliminar_fuera_de_amba():
                     punto = to_shape(v.coordenadas)
                 except Exception:
                     punto = None
-            if punto is None or not en_amba(punto.x, punto.y):
+            if punto is None:
+                print(f"AVISO: venue sin coordenadas '#{v.id} {v.nombre}' — no se elimina.")
+                continue
+            if not en_amba(punto.x, punto.y):
                 venues_eliminar.append(v.id)
         venues_borradas = 0
         if venues_eliminar:
@@ -638,16 +730,34 @@ def eliminar_conciertos_ausentes(claves_vigentes):
         return 0
     try:
         conciertos_db = db.session.query(Conciertos, Ubicaciones).join(Ubicaciones, Conciertos.ubicacion == Ubicaciones.id).all()
-        a_eliminar = [
+        vistos = [
             c.id for c, u in conciertos_db
-            if _clave_concierto(c.artista, c.fecha, c.hora, u.nombre) not in claves_vigentes
+            if _clave_concierto(c.artista, c.fecha, c.hora, u.nombre) in claves_vigentes
         ]
-        if not a_eliminar:
-            print("Sync: todos los conciertos siguen existiendo en agendade.")
-            return 0
-        eliminados = db.session.query(Conciertos).filter(Conciertos.id.in_(a_eliminar)).delete(synchronize_session=False)
+        if vistos:
+            db.session.query(Conciertos).filter(Conciertos.id.in_(vistos)).update(
+                {Conciertos.misses: 0}, synchronize_session=False)
+            db.session.commit()
+
+        no_vistos = db.session.query(Conciertos).filter(
+            Conciertos.id.notin_(vistos)
+        ).update({Conciertos.misses: Conciertos.misses + 1}, synchronize_session=False)
         db.session.commit()
-        print(f"Sync: {eliminados} conciertos ya no existen en agendade — eliminados.")
+
+        candidatos = db.session.query(Conciertos).filter(Conciertos.misses >= 2).all()
+        if not candidatos:
+            print(f"Sync: {len(vistos)} vistos, {no_vistos} ausentes en este run. Ninguno alcanzó las 2 corridas — no se borra nada.")
+            return 0
+
+        print(f"Sync: {len(vistos)} vistos, {no_vistos} ausentes en este run. {len(candidatos)} llevan 2+ corridas ausentes — se eliminarán:")
+        for c in candidatos[:30]:
+            print(f"  ELIMINAR -> {c.artista} | {c.fecha} {c.hora} | venue #{c.ubicacion} (misses={c.misses})")
+        if len(candidatos) > 30:
+            print(f"  ... y {len(candidatos) - 30} más.")
+
+        eliminados = db.session.query(Conciertos).filter(Conciertos.misses >= 2).delete(synchronize_session=False)
+        db.session.commit()
+        print(f"Sync: {eliminados} conciertos eliminados por estar ausentes en 2 corridas completas.")
         return eliminados
     except Exception as e:
         print(f"Error al eliminar conciertos ausentes: {e}")
@@ -672,7 +782,7 @@ def cronjob_eliminar_conciertos():
 
 # Scraper automático: ejecuta el scrapeo cada SCRAPER_INTERVALO_MINUTOS (0 = desactivado)
 def scheduler_scraper():
-    interval_minutos = int(os.getenv("SCRAPER_INTERVALO_MINUTOS", "720"))
+    interval_minutos = int(os.getenv("SCRAPER_INTERVALO_MINUTOS", "1440"))
     if interval_minutos <= 0:
         print("Scraper automático desactivado (SCRAPER_INTERVALO_MINUTOS=0).")
         return
@@ -700,7 +810,7 @@ except Exception as e:
 # Iniciar procesos en segundo plano al arrancar el servicio
 if os.getenv("KEEP_ALIVE_URL") or os.getenv("RENDER_EXTERNAL_URL"):
     threading.Thread(target=keep_alive, daemon=True).start()
-if int(os.getenv("SCRAPER_INTERVALO_MINUTOS", "2880")) > 0:
+if int(os.getenv("SCRAPER_INTERVALO_MINUTOS", "1440")) > 0:
     threading.Thread(target=scheduler_scraper, daemon=True).start()
 threading.Thread(target=cronjob_eliminar_conciertos, daemon=True).start()
 

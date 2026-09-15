@@ -8,6 +8,8 @@
 #   python test_local.py verify                                 # Chequea dups, región, conteo (sin scrapear)
 #   python test_local.py stale                                  # Insertar concierto vencido y verificar borrado
 #   python test_local.py scheduler                              # Verifica el hilo programado (intervalo 1 min, con stub)
+#   python test_local.py borrado_diferido                       # Verifica que el sync borra recién a las 2 corridas
+#   python test_local.py coords_null                            # Verifica que venues sin coordenadas no se borran
 #
 # Antes de importar back.py hay que apagar el scraper automático para que la
 # prueba no lance un scrapeo en background.
@@ -157,6 +159,56 @@ def scheduler():
         back.ejecutar_scrapeo = real
 
 
+def borrado_diferido():
+    # Un concierto ausente en una sola corrida NO se borra; recién con 2 corridas.
+    with back.app.app_context():
+        back.db.session.execute(back.db.text("TRUNCATE conciertos, ubicaciones RESTART IDENTITY CASCADE"))
+        back.db.session.commit()
+        punto = back.WKTElement("POINT(-58.457824 -34.680816)", srid=4326)
+        v1 = back.Ubicaciones(nombre="Venue Sync Test", capacidad_total=0, coordenadas=punto)
+        v2 = back.Ubicaciones(nombre="Venue Sync Test 2", capacidad_total=0, coordenadas=punto)
+        back.db.session.add_all([v1, v2])
+        back.db.session.commit()
+        c1 = back.Conciertos(
+            nombre="Show 1", artista="Artista A", url_evento="https://e.com/1", ubicacion=v1.id,
+            fecha=date.today() + timedelta(days=30), hora=datetime.strptime("20:00", "%H:%M").time())
+        c2 = back.Conciertos(
+            nombre="Show 2", artista="Artista B", url_evento="https://e.com/2", ubicacion=v2.id,
+            fecha=date.today() + timedelta(days=30), hora=datetime.strptime("21:00", "%H:%M").time())
+        back.db.session.add_all([c1, c2])
+        back.db.session.commit()
+        claves = {back._clave_concierto("Artista A", c1.fecha, c1.hora, "Venue Sync Test")}
+        back.eliminar_conciertos_ausentes(claves)
+        total_tras_1 = back.Conciertos.query.count()
+        assert total_tras_1 == 2, f"FALLO run 1: {total_tras_1} (esperado 2)"
+        print(f"Tras 1 corrida ausente: {total_tras_1} conciertos (sin borrado, esperado).")
+        back.eliminar_conciertos_ausentes(claves)
+        total_tras_2 = back.Conciertos.query.count()
+        assert total_tras_2 == 1, f"FALLO run 2: {total_tras_2} (esperado 1)"
+    print("OK: borrado diferido — se borra recién tras 2 corridas ausentes.")
+
+
+def coords_null():
+    # Un concierto con venue sin coordenadas NO debe borrarse como "fuera de AMBA".
+    with back.app.app_context():
+        back.db.session.execute(back.db.text("TRUNCATE conciertos, ubicaciones RESTART IDENTITY CASCADE"))
+        back.db.session.commit()
+        v = back.Ubicaciones(nombre="Venue Sin Coordenadas", capacidad_total=0, coordenadas=None)
+        back.db.session.add(v)
+        back.db.session.commit()
+        c = back.Conciertos(
+            nombre="Show", artista="Artista", url_evento="https://e.com", ubicacion=v.id,
+            fecha=date.today() + timedelta(days=30), hora=datetime.strptime("20:00", "%H:%M").time())
+        back.db.session.add(c)
+        back.db.session.commit()
+        back.eliminar_fuera_de_amba()
+        queda = back.Conciertos.query.count()
+        venue_queda = back.Ubicaciones.query.count()
+        assert queda == 1, f"FALLO coords_null: quedaron {queda} conciertos (esperado 1)"
+        assert venue_queda == 1, f"FALLO coords_null: quedaron {venue_queda} venues (esperado 1)"
+    print("OK: conciertos/venues sin coordenadas no se borran.")
+
+
 if __name__ == "__main__":
     sys.argv = sys.argv[1:] or ["verify"]
     {
@@ -165,4 +217,6 @@ if __name__ == "__main__":
         "verify": verify,
         "stale": stale,
         "scheduler": scheduler,
+        "borrado_diferido": borrado_diferido,
+        "coords_null": coords_null,
     }[sys.argv[0]]()
