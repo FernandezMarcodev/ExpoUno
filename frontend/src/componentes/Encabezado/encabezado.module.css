@@ -136,6 +136,12 @@
   position: relative;
 }
 
+.pushActivo {
+  border-color: var(--color-accent);
+  background-color: var(--color-accent-light);
+  color: var(--color-accent);
+}
+
 .contadorCampana {
   position: absolute;
   top: -4px;

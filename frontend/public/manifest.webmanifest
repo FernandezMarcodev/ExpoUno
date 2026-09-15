@@ -1,0 +1,24 @@
+{
+  "name": "Concierto Finder",
+  "short_name": "Conciertos",
+  "description": "Descubrí conciertos en Buenos Aires, seguí artistas y recibí avisos.",
+  "start_url": "/",
+  "display": "standalone",
+  "background_color": "#f8f9fc",
+  "theme_color": "#00AEEF",
+  "lang": "es",
+  "icons": [
+    {
+      "src": "/logo.png",
+      "sizes": "192x192",
+      "type": "image/png",
+      "purpose": "any maskable"
+    },
+    {
+      "src": "/logo.png",
+      "sizes": "512x512",
+      "type": "image/png",
+      "purpose": "any maskable"
+    }
+  ]
+}

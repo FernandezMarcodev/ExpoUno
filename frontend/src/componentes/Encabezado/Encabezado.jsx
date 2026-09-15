@@ -4,6 +4,7 @@ import { FaSun, FaMoon, FaSignOutAlt, FaBell } from "react-icons/fa";
 import { Link } from "react-router-dom";
 import { useAuth } from "../../contextos/AuthContext";
 import { useNovedades } from "../../contextos/NovedadesContext";
+import TogglePush from "./TogglePush";
 
 function Encabezado() {
   const [modoOscuro, setModoOscuro] = useState(false);
@@ -59,6 +60,7 @@ function Encabezado() {
             Favoritos
           </Link>
         )}
+        {autenticado && <TogglePush />}
         {autenticado && (
           <div className={styles.campanaWrapper} ref={campanaRef}>
             <button
