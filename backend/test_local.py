@@ -269,7 +269,7 @@ def auth():
     # /me con token -> perfil
     r = cliente.get("/me", headers={"Authorization": f"Bearer {token}"})
     assert r.status_code == 200, f"/me: {r.status_code}"
-    assert r.get_json()["id"] == datos["usuario"]["id"]
+    assert r.get_json()["usuario"]["id"] == datos["usuario"]["id"]
     print("OK /me con token: perfil correcto.")
 
     # /me con token corrupto -> 401

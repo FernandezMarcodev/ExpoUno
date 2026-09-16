@@ -754,7 +754,7 @@ def me():
     usuario = db.session.get(Usuarios, g.usuario_id)
     if not usuario:
         return jsonify({"error": "Usuario no encontrado"}), 404
-    return jsonify(serializar_usuario(usuario))
+    return jsonify({"usuario": serializar_usuario(usuario)})
 
 
 # ============================ FAVORITOS ============================
