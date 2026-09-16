@@ -121,9 +121,14 @@ function Encabezado() {
         {autenticado ? (
           <span className={styles.usuario}>{usuario?.nombre}</span>
         ) : (
-          <Link to="/login" className={styles.enlaceAccion}>
-            Iniciar sesión
-          </Link>
+          <div className={styles.botonesAuth}>
+            <Link to="/login" className={styles.enlaceSecundario}>
+              Iniciar sesión
+            </Link>
+            <Link to="/registro" className={styles.enlaceAccion}>
+              Crear cuenta
+            </Link>
+          </div>
         )}
         <button
           className={styles.temaToggle}

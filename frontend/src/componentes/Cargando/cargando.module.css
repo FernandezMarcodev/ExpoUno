@@ -1,0 +1,46 @@
+.cargando {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  text-align: center;
+  background-color: var(--color-surface);
+  border: 1px solid var(--color-border);
+  border-radius: var(--radius-lg);
+  padding: var(--space-10) var(--space-6);
+  margin: var(--space-4) 0;
+  box-shadow: var(--shadow-xs);
+  color: var(--color-text);
+}
+
+.wrapperIcono {
+  width: 56px;
+  height: 56px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  border-radius: var(--radius-full);
+  background-color: var(--color-accent-light);
+  margin-bottom: var(--space-4);
+}
+
+.anillo {
+  width: 24px;
+  height: 24px;
+  border-radius: var(--radius-full);
+  border: 3px solid var(--color-accent-light);
+  border-top-color: var(--color-accent);
+  animation: girar 0.8s linear infinite;
+}
+
+@keyframes girar {
+  to {
+    transform: rotate(360deg);
+  }
+}
+
+.mensaje {
+  margin: 0;
+  font-size: var(--text-sm);
+  color: var(--color-text-secondary);
+}

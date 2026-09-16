@@ -2,12 +2,30 @@ import React, { useMemo, useState, useEffect } from 'react';
 import PieDePagina from '../componentes/PieDePagina/PieDePagina';
 import Mapa from '../componentes/Mapa/Mapa';
 import TarjetaConcierto from '../componentes/TarjetaConcierto/TarjetaConcierto';
+import TarjetaGrupo from '../componentes/TarjetaGrupo/TarjetaGrupo';
 import Filtros from '../componentes/Filtros/Filtros';
 import EstadoVacio from '../componentes/EstadoVacio/EstadoVacio';
+import Cargando from '../componentes/Cargando/Cargando';
 import Encabezado from '../componentes/Encabezado/Encabezado';
 import { conciertoServicio } from '../servicios/conciertoServicio';
+import { agruparPorPunto } from '../utilidades/grupos';
+import { normalizarTexto } from '../utilidades/texto';
+import { useAuth } from '../contextos/AuthContext';
+import { useFavoritos } from '../contextos/FavoritosContext';
+import { useSeguidos } from '../contextos/SeguidosContext';
+
+const VISTAS = [
+  { valor: 'todos', etiqueta: 'Todos' },
+  { valor: 'favoritos', etiqueta: 'Mis favoritos' },
+  { valor: 'siguiendo', etiqueta: 'Siguiendo' },
+];
 
 const Inicio = () => {
+  const { autenticado } = useAuth();
+  const { cantidadFavoritos, esFavorito } = useFavoritos();
+  const { seguidos } = useSeguidos();
+
+  const [vista, setVista] = useState('todos');
   const [conciertoSeleccionado, setConciertoSeleccionado] = useState(null);
   const [conciertosBase, setConciertosBase] = useState([]);
   const [conciertos, setConciertos] = useState([]);
@@ -25,8 +43,13 @@ const Inicio = () => {
       conciertosBase
         .filter(c => c.artista)
         .map(c => c.artista)
-    )].sort();
+    )].sort((a, b) => a.localeCompare(b, 'es'));
   }, [conciertosBase]);
+
+  const setSeguidosNorm = useMemo(
+    () => new Set(seguidos.map((a) => a.trim().toLowerCase())),
+    [seguidos]
+  );
 
   const distanciaKm = (lat1, lon1, lat2, lon2) => {
     const toRad = (v) => (v * Math.PI) / 180;
@@ -84,15 +107,28 @@ const Inicio = () => {
     return () => { activo = false; };
   }, []);
 
+  const seleccionarVista = (nueva) => {
+    if (nueva === 'favoritos' && !autenticado) {
+      window.location.hash = '#/login';
+      return;
+    }
+    setVista(nueva);
+  };
+
   useEffect(() => {
     if (!conciertosBase || conciertosBase.length === 0) return;
 
     const timeout = setTimeout(() => {
+      const nombreArtista = normalizarTexto(filtros.artista);
+
       const filtrados = conciertosBase.filter(c => {
-        const pasaArtista = filtros.artista
-          ? c.artista?.toLowerCase().includes(filtros.artista.toLowerCase())
-          : true;
-        if (!pasaArtista) return false;
+        if (vista === 'favoritos' && !esFavorito(c.id)) return false;
+        if (vista === 'siguiendo') {
+          const nombreNorm = normalizarTexto(c.artista);
+          if (!c.artista?.trim() || !setSeguidosNorm.has(nombreNorm)) return false;
+        }
+
+        if (nombreArtista && !normalizarTexto(c.artista).includes(nombreArtista)) return false;
 
         if (filtros.ubicacionActual && c.ubicacion_detalle?.coordenadas) {
           const lat = c.ubicacion_detalle.coordenadas[1];
@@ -113,7 +149,21 @@ const Inicio = () => {
     }, 300);
 
     return () => clearTimeout(timeout);
-  }, [filtros, conciertosBase]);
+  }, [filtros, conciertosBase, vista, esFavorito, setSeguidosNorm]);
+
+  const grupos = useMemo(() => agruparPorPunto(conciertos), [conciertos]);
+
+  const reiniciarFiltros = () => {
+    setFiltros({ artista: '', radio: 5, ubicacionActual: null });
+    setVista('todos');
+  };
+
+  const mensajeVacio =
+    vista === 'favoritos'
+      ? { titulo: 'Todavía no guardaste favoritos', descripcion: 'Tocá el corazón en una tarjeta para guardar el concierto y verlo acá.' }
+      : vista === 'siguiendo'
+        ? { titulo: 'Todavía no seguís artistas', descripcion: 'Tocá «Seguir» en una tarjeta y vas a recibir avisos cuando tengan nuevos conciertos.' }
+        : null;
 
   return (
     <div className="pagina-inicio">
@@ -134,6 +184,22 @@ const Inicio = () => {
         </section>
 
         <Filtros filtros={filtros} setFiltros={setFiltros} artistas={artistas} />
+
+        <div className="tabs-vista" role="tablist" aria-label="Vista de conciertos">
+          {VISTAS.map((v) => (
+            <button
+              key={v.valor}
+              role="tab"
+              aria-selected={vista === v.valor}
+              className={`tab-vista ${vista === v.valor ? 'tab-vistaActiva' : ''}`}
+              onClick={() => seleccionarVista(v.valor)}
+            >
+              {v.valor === 'favoritos' && cantidadFavoritos > 0
+                ? `Mis favoritos (${cantidadFavoritos})`
+                : v.etiqueta}
+            </button>
+          ))}
+        </div>
 
         <div className="contenedor-grid" id="zona-mapa">
           <div className="col-mapa" id="col-mapa">
@@ -159,17 +225,33 @@ const Inicio = () => {
           <div className="col-lista">
             {error ? (
               <EstadoVacio tipo="error" />
+            ) : cargando ? (
+              <Cargando />
             ) : conciertos.length === 0 ? (
-              <EstadoVacio tipo="sin-resultados" />
+              <EstadoVacio
+                tipo="sin-resultados"
+                titulo={mensajeVacio?.titulo}
+                descripcion={mensajeVacio?.descripcion}
+                onReiniciar={reiniciarFiltros}
+              />
             ) : (
-              conciertos.map(concierto => (
-                <TarjetaConcierto
-                  key={concierto.id}
-                  concierto={concierto}
-                  seleccionado={conciertoSeleccionado?.id === concierto.id}
-                  onVerEnMapa={verEnMapa}
-                />
-              ))
+              grupos.map(grupo =>
+                grupo.conciertos.length > 1 ? (
+                  <TarjetaGrupo
+                    key={grupo.lat ? `${grupo.lat},${grupo.lng}` : `suelto-${grupo.conciertos[0].id}`}
+                    grupo={grupo}
+                    seleccionadoId={conciertoSeleccionado?.id}
+                    onVerEnMapa={verEnMapa}
+                  />
+                ) : (
+                  <TarjetaConcierto
+                    key={grupo.conciertos[0].id}
+                    concierto={grupo.conciertos[0]}
+                    seleccionado={conciertoSeleccionado?.id === grupo.conciertos[0].id}
+                    onVerEnMapa={verEnMapa}
+                  />
+                )
+              )
             )}
           </div>
         </div>

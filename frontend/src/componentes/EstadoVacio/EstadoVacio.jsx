@@ -2,7 +2,7 @@ import React from "react";
 import styles from "./estadoVacio.module.css";
 import { FaSearch, FaExclamationTriangle } from "react-icons/fa";
 
-const EstadoVacio = ({ tipo = "sin-resultados" }) => {
+const EstadoVacio = ({ tipo = "sin-resultados", titulo, descripcion, onReiniciar }) => {
   const configs = {
     "sin-resultados": {
       titulo: "No hay conciertos",
@@ -25,14 +25,16 @@ const EstadoVacio = ({ tipo = "sin-resultados" }) => {
       <div className={styles.iconoWrapper}>
         {config.icono}
       </div>
-      <h3 className={styles.titulo}>{config.titulo}</h3>
-      <p className={styles.descripcion}>{config.descripcion}</p>
-      {tipo === "error" && (
+      <h3 className={styles.titulo}>{titulo || config.titulo}</h3>
+      <p className={styles.descripcion}>
+        {descripcion !== undefined ? descripcion : config.descripcion}
+      </p>
+      {(tipo === "error" || onReiniciar) && (
         <button
           className={styles.botonReintentar}
-          onClick={() => window.location.reload()}
+          onClick={() => (onReiniciar ? onReiniciar() : window.location.reload())}
         >
-          Reintentar
+          {tipo === "error" ? "Reintentar" : "Limpiar filtros"}
         </button>
       )}
     </div>
