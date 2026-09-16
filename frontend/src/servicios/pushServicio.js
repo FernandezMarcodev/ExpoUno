@@ -45,18 +45,19 @@ export const pushServicio = {
     if (!pushServicio.compatible()) return 'no-soportado';
     const registro = await pushServicio.listo();
     const suscripcion = await registro.pushManager.getSubscription();
-    if (!suscripcion) return 'no-suscrito';
-    if (!('showNotification' in Notification)) return 'soporte-parcial';
-    return 'suscrito';
+    return suscripcion ? 'suscrito' : 'no-suscrito';
   },
 
   async suscribir(token) {
     const registro = await pushServicio.listo();
-    const clave = await pushServicio.claveVapid();
-    const suscripcion = await registro.pushManager.subscribe({
-      userVisibleOnly: true,
-      applicationServerKey: urlBase64AUnit8Array(clave),
-    });
+    let suscripcion = await registro.pushManager.getSubscription();
+    if (!suscripcion) {
+      const clave = await pushServicio.claveVapid();
+      suscripcion = await registro.pushManager.subscribe({
+        userVisibleOnly: true,
+        applicationServerKey: urlBase64AUnit8Array(clave),
+      });
+    }
 
     const clave_publica = suscripcion.getKey('p256dh') ? bufferABase64Url(suscripcion.getKey('p256dh')) : '';
     const autenticacion = suscripcion.getKey('auth') ? bufferABase64Url(suscripcion.getKey('auth')) : '';

@@ -10,8 +10,10 @@ const CampanaNotificaciones = () => {
   const { notificaciones, noLeidas, marcarLeida, marcarTodas } = useNovedades();
   const [abierta, setAbierta] = useState(false);
   const [soportado, setSoportado] = useState(false);
+  const [permiso, setPermiso] = useState(null);
   const [pushActivadas, setPushActivadas] = useState(false);
   const [cargandoPush, setCargandoPush] = useState(false);
+  const [errorPush, setErrorPush] = useState(null);
   const campanaRef = useRef(null);
 
   useEffect(() => {
@@ -33,25 +35,60 @@ const CampanaNotificaciones = () => {
         if (!activo) return;
         setSoportado(estado !== 'no-soportado');
         setPushActivadas(estado === 'suscrito');
+        if (typeof Notification !== 'undefined') {
+          setPermiso(Notification.permission || null);
+        }
       })
       .catch(() => {});
     return () => { activo = false; };
-  }, [token]);
+  }, [token, abierta]);
+
+  async function sincronizarEstado() {
+    try {
+      const estado = await pushServicio.estado();
+      setSoportado(estado !== 'no-soportado');
+      setPushActivadas(estado === 'suscrito');
+      if (typeof Notification !== 'undefined') {
+        setPermiso(Notification.permission || null);
+      }
+    } catch {
+      setSoportado(false);
+    }
+  }
 
   async function alternarPush() {
     setCargandoPush(true);
+    setErrorPush(null);
     try {
       if (!pushActivadas) {
-        const permiso = await Notification.requestPermission();
-        if (permiso !== 'granted') return;
+        const resultado = await Notification.requestPermission();
+        setPermiso(resultado);
+        if (resultado !== 'granted') {
+          setErrorPush(
+            resultado === 'denied'
+              ? 'Las notificaciones están bloqueadas en este navegador. Habilitá el permiso en la configuración del sitio (ícono de candado en la barra de direcciones) y volvé a intentar.'
+              : 'Tocá «Permitir» en el aviso del navegador para activar las notificaciones.'
+          );
+          return;
+        }
         await pushServicio.suscribir(token);
-        setPushActivadas(true);
+        await sincronizarEstado();
       } else {
         setPushActivadas(false);
         await pushServicio.desuscribir(token);
+        await sincronizarEstado();
       }
     } catch (error) {
       console.error('Error al gestionar notificaciones push:', error);
+      const detalle = error instanceof Error ? error.message : String(error);
+      if (error?.status === 401) {
+        setErrorPush('Tu sesión expiró. Volvé a iniciar sesión para activar las notificaciones.');
+      } else {
+        setErrorPush(
+          `No se pudieron activar las notificaciones: ${detalle}. Revisá el permiso de notificaciones del navegador para este sitio e intentá de nuevo.`
+        );
+      }
+      await sincronizarEstado();
     } finally {
       setCargandoPush(false);
     }
@@ -82,10 +119,14 @@ const CampanaNotificaciones = () => {
             )}
           </div>
 
-          {soportado && (
+          {soportado ? (
             <div className={styles.filaPush}>
               <span className={styles.estadoPush}>
-                {pushActivadas ? 'Notificaciones activadas' : 'Notificaciones desactivadas'}
+                {cargandoPush
+                  ? 'Actualizando…'
+                  : pushActivadas
+                    ? 'Notificaciones activadas'
+                    : 'Notificaciones desactivadas'}
               </span>
               <button
                 className={`${styles.botonPush} ${pushActivadas ? styles.botonPushActivo : ""}`}
@@ -99,6 +140,17 @@ const CampanaNotificaciones = () => {
                     : 'Activar'}
               </button>
             </div>
+          ) : (
+            <p className={styles.avisoPush}>
+              Tu navegador no permite notificaciones push.
+            </p>
+          )}
+
+          {errorPush && <p className={styles.errorPush}>{errorPush}</p>}
+          {!errorPush && permiso === 'denied' && (
+            <p className={styles.errorPush}>
+              Las notificaciones están bloqueadas en este navegador. Habilitá el permiso en la configuración del sitio (ícono de candado en la barra de direcciones) y entrá de nuevo a la pestaña.
+            </p>
           )}
 
           {notificaciones.length === 0 ? (
