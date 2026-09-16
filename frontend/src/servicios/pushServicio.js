@@ -43,7 +43,7 @@ export const pushServicio = {
 
   async estado() {
     if (!pushServicio.compatible()) return 'no-soportado';
-    const registro = await navigator.serviceWorker.ready;
+    const registro = await pushServicio.listo();
     const suscripcion = await registro.pushManager.getSubscription();
     if (!suscripcion) return 'no-suscrito';
     if (!('showNotification' in Notification)) return 'soporte-parcial';

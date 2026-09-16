@@ -236,6 +236,13 @@ html.dark .logo-principal {
   height: var(--altura-mapa, 560px);
 }
 
+/* En desktop (grid de dos columnas) el mapa se veía cortado: era 700px y quedó en 560px. */
+@media (min-width: 961px) {
+  .col-mapa {
+    height: var(--altura-mapa, 640px);
+  }
+}
+
 .contenedor-grid > .col-mapa:empty {
   height: auto;
 }

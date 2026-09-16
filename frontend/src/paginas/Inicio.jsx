@@ -2,7 +2,6 @@ import React, { useMemo, useState, useEffect } from 'react';
 import { useNavigate } from 'react-router-dom';
 import PieDePagina from '../componentes/PieDePagina/PieDePagina';
 import Mapa from '../componentes/Mapa/Mapa';
-import TarjetaConcierto from '../componentes/TarjetaConcierto/TarjetaConcierto';
 import TarjetaGrupo from '../componentes/TarjetaGrupo/TarjetaGrupo';
 import Filtros from '../componentes/Filtros/Filtros';
 import EstadoVacio from '../componentes/EstadoVacio/EstadoVacio';
@@ -241,23 +240,14 @@ const Inicio = () => {
                 onReiniciar={reiniciarFiltros}
               />
             ) : (
-              grupos.map(grupo =>
-                grupo.conciertos.length > 1 ? (
-                  <TarjetaGrupo
-                    key={grupo.lat ? `${grupo.lat},${grupo.lng}` : `suelto-${grupo.conciertos[0].id}`}
-                    grupo={grupo}
-                    seleccionadoId={conciertoSeleccionado?.id}
-                    onVerEnMapa={verEnMapa}
-                  />
-                ) : (
-                  <TarjetaConcierto
-                    key={grupo.conciertos[0].id}
-                    concierto={grupo.conciertos[0]}
-                    seleccionado={conciertoSeleccionado?.id === grupo.conciertos[0].id}
-                    onVerEnMapa={verEnMapa}
-                  />
-                )
-              )
+              grupos.map(grupo => (
+                <TarjetaGrupo
+                  key={grupo.lat ? `${grupo.lat},${grupo.lng}` : `suelto-${grupo.conciertos[0].id}`}
+                  grupo={grupo}
+                  seleccionadoId={conciertoSeleccionado?.id}
+                  onVerEnMapa={verEnMapa}
+                />
+              ))
             )}
           </div>
         </div>

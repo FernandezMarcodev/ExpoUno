@@ -2,7 +2,6 @@ import React, { useMemo, useState } from 'react';
 import { Navigate } from 'react-router-dom';
 import Encabezado from '../componentes/Encabezado/Encabezado';
 import PieDePagina from '../componentes/PieDePagina/PieDePagina';
-import TarjetaConcierto from '../componentes/TarjetaConcierto/TarjetaConcierto';
 import TarjetaGrupo from '../componentes/TarjetaGrupo/TarjetaGrupo';
 import EstadoVacio from '../componentes/EstadoVacio/EstadoVacio';
 import Cargando from '../componentes/Cargando/Cargando';
@@ -76,23 +75,14 @@ const MisFavoritos = () => {
                 descripcion="Tocá el corazón en una tarjeta para guardar el concierto y verlo acá."
               />
             ) : (
-              grupos.map(grupo =>
-                grupo.conciertos.length > 1 ? (
-                  <TarjetaGrupo
-                    key={grupo.lat ? `${grupo.lat},${grupo.lng}` : `suelto-${grupo.conciertos[0].id}`}
-                    grupo={grupo}
-                    seleccionadoId={conciertoSeleccionado?.id}
-                    onVerEnMapa={verEnMapa}
-                  />
-                ) : (
-                  <TarjetaConcierto
-                    key={grupo.conciertos[0].id}
-                    concierto={grupo.conciertos[0]}
-                    seleccionado={conciertoSeleccionado?.id === grupo.conciertos[0].id}
-                    onVerEnMapa={verEnMapa}
-                  />
-                )
-              )
+              grupos.map(grupo => (
+                <TarjetaGrupo
+                  key={grupo.lat ? `${grupo.lat},${grupo.lng}` : `suelto-${grupo.conciertos[0].id}`}
+                  grupo={grupo}
+                  seleccionadoId={conciertoSeleccionado?.id}
+                  onVerEnMapa={verEnMapa}
+                />
+              ))
             )}
           </div>
         </div>
