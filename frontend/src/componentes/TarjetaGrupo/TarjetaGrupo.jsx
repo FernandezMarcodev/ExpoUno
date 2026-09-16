@@ -58,7 +58,7 @@ const TarjetaGrupo = ({ grupo, seleccionadoId, onVerEnMapa }) => {
                 <div className={styles.filaInfo}>
                   <div className={styles.tituloFila}>
                     <span className={styles.artistaFila}>{concierto.artista}</span>
-                    {concierto.nombre && (
+                    {concierto.nombre && concierto.nombre !== concierto.artista && (
                       <span className={styles.nombreFila}>{concierto.nombre}</span>
                     )}
                   </div>

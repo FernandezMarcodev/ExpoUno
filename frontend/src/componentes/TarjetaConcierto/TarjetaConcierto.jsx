@@ -33,7 +33,7 @@ const TarjetaConcierto = ({ concierto, seleccionado, onVerEnMapa }) => {
   return (
     <div className={`${styles.tarjeta} ${seleccionado ? styles.tarjetaSeleccionada : ""}`}>
       <div className={styles.cabecera}>
-        <h3 className={styles.nombre}>{concierto.nombre}</h3>
+        <h3 className={styles.nombre}>{concierto.nombre || concierto.artista}</h3>
         <div className={styles.cabeceraDerecha}>
           <button
             className={`${styles.botonFavorito} ${favorito ? styles.favoritoActivo : ""}`}
@@ -50,11 +50,13 @@ const TarjetaConcierto = ({ concierto, seleccionado, onVerEnMapa }) => {
         </div>
       </div>
 
-      <div className={styles.info}>
-        <div className={styles.filaInfo}>
-          <FaUser className={styles.iconoInfo} />
-          <span>{concierto.artista}</span>
-        </div>
+<div className={styles.info}>
+          {concierto.nombre && concierto.nombre !== concierto.artista && (
+            <div className={styles.filaInfo}>
+              <FaUser className={styles.iconoInfo} />
+              <span>{concierto.artista}</span>
+            </div>
+          )}
         <div className={styles.filaInfo}>
           <FaMapMarkerAlt className={styles.iconoInfo} />
           <span>{concierto.ubicacion_detalle?.nombre}</span>

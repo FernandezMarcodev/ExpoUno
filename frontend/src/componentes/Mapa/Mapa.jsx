@@ -239,7 +239,13 @@ function Mapa({ centro, zoom, conciertos = [], ubicacionUsuario, radioKm, selecc
                   {lista.length === 1 ? (
                     <>
                       <div className={styles.popupTitle}>{lista[0].artista}</div>
-                      <div className={styles.popupSub}>{lista[0].nombre || ""}</div>
+                      {lista[0].nombre && lista[0].nombre !== lista[0].artista && (
+                        <div className={styles.popupSub}>{lista[0].nombre}</div>
+                      )}
+                      <div className={styles.popupSub}>
+                        {new Date(lista[0].fecha).toLocaleDateString('es-AR')}
+                        {lista[0].hora ? ` · ${lista[0].hora.substring(0, 5)}` : ""}
+                      </div>
                       <div className={styles.popupActions}>
                         <a href={lista[0].url_evento} target="_blank" rel="noopener noreferrer">Entradas</a>
                       </div>
