@@ -35,11 +35,6 @@ const TarjetaConcierto = ({ concierto, seleccionado, onVerEnMapa }) => {
       <div className={styles.cabecera}>
         <h3 className={styles.nombre}>{concierto.nombre}</h3>
         <div className={styles.cabeceraDerecha}>
-          {concierto.isAgotado ? (
-            <span className={styles.estadoAgotado}>Agotado</span>
-          ) : (
-            <span className={styles.estadoDisponible}>Disponible</span>
-          )}
           <button
             className={`${styles.botonFavorito} ${favorito ? styles.favoritoActivo : ""}`}
             onClick={alternar}

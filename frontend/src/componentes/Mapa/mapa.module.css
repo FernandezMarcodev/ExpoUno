@@ -1,6 +1,8 @@
 /* ====== CONTENEDOR DEL MAPA ====== */
 .contenedorMapa {
   position: relative;
+  height: 100%;
+  width: 100%;
   background-color: var(--color-surface);
   border: 1px solid var(--color-border);
   border-radius: var(--radius-lg);

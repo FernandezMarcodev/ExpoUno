@@ -1,4 +1,5 @@
 import React, { useMemo, useState, useEffect } from 'react';
+import { useNavigate } from 'react-router-dom';
 import PieDePagina from '../componentes/PieDePagina/PieDePagina';
 import Mapa from '../componentes/Mapa/Mapa';
 import TarjetaConcierto from '../componentes/TarjetaConcierto/TarjetaConcierto';
@@ -24,6 +25,7 @@ const Inicio = () => {
   const { autenticado } = useAuth();
   const { cantidadFavoritos, esFavorito } = useFavoritos();
   const { seguidos } = useSeguidos();
+  const navegar = useNavigate();
 
   const [vista, setVista] = useState('todos');
   const [conciertoSeleccionado, setConciertoSeleccionado] = useState(null);
@@ -108,8 +110,8 @@ const Inicio = () => {
   }, []);
 
   const seleccionarVista = (nueva) => {
-    if (nueva === 'favoritos' && !autenticado) {
-      window.location.hash = '#/login';
+    if (nueva !== 'todos' && !autenticado) {
+      navegar('/login');
       return;
     }
     setVista(nueva);

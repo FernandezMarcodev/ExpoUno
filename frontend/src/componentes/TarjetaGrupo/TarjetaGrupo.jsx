@@ -73,19 +73,27 @@ const TarjetaGrupo = ({ grupo, seleccionadoId, onVerEnMapa }) => {
                         {concierto.hora.substring(0, 5)}
                       </span>
                     )}
-                    <span
-                      className={`${styles.estado} ${
-                        concierto.isAgotado ? styles.estadoAgotado : styles.estadoDisponible
-                      }`}
-                    >
-                      {concierto.isAgotado ? "Agotado" : "Disponible"}
-                    </span>
                   </div>
                 </div>
 
                 <div className={styles.accionesRapidas}>
                   <button
-                    className={`${styles.botonIcono} ${
+                    className={`${styles.botonSeguir} ${
+                      siguiendo ? styles.botonSeguirActivo : ""
+                    }`}
+                    onClick={() => cambiarSeguido(concierto.artista)}
+                    aria-pressed={siguiendo}
+                    title={siguiendo ? "Dejar de seguir" : "Seguir artista"}
+                  >
+                    {siguiendo ? (
+                      <FaBell className={styles.iconoAccion} />
+                    ) : (
+                      <FaRegBell className={styles.iconoAccion} />
+                    )}
+                    {siguiendo ? "Siguiendo" : "Seguir"}
+                  </button>
+                  <button
+                    className={`${styles.botonFavorito} ${
                       favorito ? styles.botonFavoritoActivo : ""
                     }`}
                     onClick={() => cambiarFavorito(concierto)}
@@ -96,20 +104,6 @@ const TarjetaGrupo = ({ grupo, seleccionadoId, onVerEnMapa }) => {
                       <FaHeart className={styles.iconoAccion} />
                     ) : (
                       <FaRegHeart className={styles.iconoAccion} />
-                    )}
-                  </button>
-                  <button
-                    className={`${styles.botonIcono} ${
-                      siguiendo ? styles.botonSeguidoActivo : ""
-                    }`}
-                    onClick={() => cambiarSeguido(concierto.artista)}
-                    aria-label={siguiendo ? "Dejar de seguir" : "Seguir artista"}
-                    title={siguiendo ? "Dejar de seguir" : "Seguir artista"}
-                  >
-                    {siguiendo ? (
-                      <FaBell className={styles.iconoAccion} />
-                    ) : (
-                      <FaRegBell className={styles.iconoAccion} />
                     )}
                   </button>
                 </div>
