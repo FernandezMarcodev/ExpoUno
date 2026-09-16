@@ -1,13 +1,15 @@
 import styles from "./encabezado.module.css";
 import { useState, useEffect, useRef } from "react";
-import { FaSun, FaMoon, FaSignOutAlt, FaBell } from "react-icons/fa";
+import { FaSun, FaMoon, FaSignOutAlt, FaBell, FaQuestionCircle } from "react-icons/fa";
 import { Link } from "react-router-dom";
 import { useAuth } from "../../contextos/AuthContext";
 import { useNovedades } from "../../contextos/NovedadesContext";
 import TogglePush from "./TogglePush";
+import ManualUsuario from "../ManualUsuario/ManualUsuario";
 
 function Encabezado() {
   const [modoOscuro, setModoOscuro] = useState(false);
+  const [manualAbierto, setManualAbierto] = useState(false);
   const { usuario, autenticado, cerrarSesion } = useAuth();
   const { notificaciones, noLeidas, marcarLeida, marcarTodas } = useNovedades();
   const [campanaAbierta, setCampanaAbierta] = useState(false);
@@ -126,6 +128,14 @@ function Encabezado() {
         )}
         <button
           className={styles.temaToggle}
+          onClick={() => setManualAbierto(true)}
+          aria-label="Cómo usar la página"
+          title="Cómo usar la página"
+        >
+          <FaQuestionCircle className={styles.iconoTema} />
+        </button>
+        <button
+          className={styles.temaToggle}
           onClick={cambiarTema}
           aria-label={modoOscuro ? "Cambiar a modo claro" : "Cambiar a modo oscuro"}
           title={modoOscuro ? "Cambiar a modo claro" : "Cambiar a modo oscuro"}
@@ -147,6 +157,8 @@ function Encabezado() {
           </button>
         )}
       </div>
+
+      <ManualUsuario abierto={manualAbierto} alCerrar={() => setManualAbierto(false)} />
     </header>
   );
 }

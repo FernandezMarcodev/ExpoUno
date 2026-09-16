@@ -129,6 +129,21 @@
   color: var(--color-text-secondary);
 }
 
+.popupLugar {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  font-size: var(--text-sm);
+  color: var(--color-text-secondary);
+}
+
+.iconoLugar {
+  width: 12px;
+  height: 12px;
+  color: var(--color-accent);
+  flex-shrink: 0;
+}
+
 /* ====== POPUP LIST ====== */
 .popupList {
   display: grid;

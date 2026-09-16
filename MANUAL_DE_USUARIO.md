@@ -2,6 +2,8 @@
 
 Concierto Finder te permite descubrir los próximos conciertos en Buenos Aires y alrededores, seguirlos, marcarlos como favoritos y recibir avisos cuando tus artistas tengan novedades.
 
+> **Guía interactiva**: dentro de la página, tocá el botón **¿Cómo usar?** (ícono de signo de pregunta en el encabezado) para ver esta guía paso a paso en el propio sitio.
+
 ---
 
 ## 1. Crear cuenta e iniciar sesión

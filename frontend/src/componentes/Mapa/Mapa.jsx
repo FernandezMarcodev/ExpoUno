@@ -1,6 +1,7 @@
 import React, { useEffect, useMemo, useRef, useState } from "react";
 import { MapContainer, TileLayer, ZoomControl, Marker, Popup, useMap, Circle, CircleMarker } from "react-leaflet";
 import { FiMoon, FiRefreshCw, FiSun } from "react-icons/fi";
+import { FaMapMarkerAlt } from "react-icons/fa";
 import L from "leaflet";
 import "leaflet/dist/leaflet.css";
 import styles from "./mapa.module.css";
@@ -242,6 +243,10 @@ function Mapa({ centro, zoom, conciertos = [], ubicacionUsuario, radioKm, selecc
                       {lista[0].nombre && lista[0].nombre !== lista[0].artista && (
                         <div className={styles.popupSub}>{lista[0].nombre}</div>
                       )}
+                      <div className={styles.popupLugar}>
+                        <FaMapMarkerAlt className={styles.iconoLugar} />
+                        {lista[0].ubicacion_detalle?.nombre || "Ubicación"}
+                      </div>
                       <div className={styles.popupSub}>
                         {new Date(lista[0].fecha).toLocaleDateString('es-AR')}
                         {lista[0].hora ? ` · ${lista[0].hora.substring(0, 5)}` : ""}
