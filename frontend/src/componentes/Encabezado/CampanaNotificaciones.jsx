@@ -66,7 +66,7 @@ const CampanaNotificaciones = () => {
         if (resultado !== 'granted') {
           setErrorPush(
             resultado === 'denied'
-              ? 'Las notificaciones están bloqueadas en este navegador. Habilitá el permiso en la configuración del sitio (ícono de candado en la barra de direcciones) y volvé a intentar.'
+              ? 'Las notificaciones están bloqueadas. Habilitá el permiso de notificaciones para este sitio en la configuración de tu navegador y volvé a intentar.'
               : 'Tocá «Permitir» en el aviso del navegador para activar las notificaciones.'
           );
           return;
@@ -79,13 +79,13 @@ const CampanaNotificaciones = () => {
         await sincronizarEstado();
       }
     } catch (error) {
-      console.error('Error al gestionar notificaciones push:', error);
       const detalle = error instanceof Error ? error.message : String(error);
+      console.error('Error al gestionar notificaciones push:', detalle);
       if (error?.status === 401) {
         setErrorPush('Tu sesión expiró. Volvé a iniciar sesión para activar las notificaciones.');
       } else {
         setErrorPush(
-          `No se pudieron activar las notificaciones: ${detalle}. Revisá el permiso de notificaciones del navegador para este sitio e intentá de nuevo.`
+          'No se pudieron activar las notificaciones. Asegurate de aceptar el permiso de notificaciones cuando el navegador lo pida e intentá de nuevo.'
         );
       }
       await sincronizarEstado();

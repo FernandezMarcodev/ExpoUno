@@ -3,10 +3,10 @@ import { pedirJson } from './api';
 function urlBase64AUnit8Array(base64) {
   const relleno = '='.repeat((4 - (base64.length % 4)) % 4);
   const base64ConRelleno = (base64 + relleno).replace(/-/g, '+').replace(/_/g, '/');
-  const texto = decodeURIComponent(escape(atob(base64ConRelleno)));
-  const bytes = new Uint8Array(texto.length);
-  for (let i = 0; i < texto.length; i++) {
-    bytes[i] = texto.charCodeAt(i);
+  const binario = atob(base64ConRelleno);
+  const bytes = new Uint8Array(binario.length);
+  for (let i = 0; i < binario.length; i++) {
+    bytes[i] = binario.charCodeAt(i);
   }
   return bytes;
 }
