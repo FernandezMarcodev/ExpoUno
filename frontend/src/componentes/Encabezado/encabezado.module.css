@@ -304,14 +304,37 @@
 @media (max-width: 640px) {
   .encabezado {
     padding: var(--space-3) var(--space-4);
+    gap: var(--space-2);
+  }
+
+  .marca {
+    min-width: 0;
   }
 
   .tituloMarca {
     font-size: var(--text-base);
   }
 
+  .acciones {
+    gap: var(--space-1);
+  }
+
+  .usuario {
+    display: none;
+  }
+
   .temaToggle {
     width: 36px;
     height: 36px;
+  }
+
+  .enlaceSecundario,
+  .enlaceAccion {
+    padding: var(--space-2) var(--space-3);
+    font-size: var(--text-xs);
+  }
+
+  .botonesAuth {
+    gap: var(--space-1);
   }
 }

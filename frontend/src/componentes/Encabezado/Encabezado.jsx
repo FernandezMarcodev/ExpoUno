@@ -50,16 +50,10 @@ function Encabezado() {
   return (
     <header className={styles.encabezado}>
       <Link to="/" className={styles.marca}>
-        <img src="/logo.png" alt="" className={styles.logoMarca} aria-hidden="true" />
         <h1 className={styles.tituloMarca}>Concierto Finder</h1>
       </Link>
 
       <div className={styles.acciones}>
-        {autenticado && (
-          <Link to="/favoritos" className={styles.enlaceSecundario}>
-            Favoritos
-          </Link>
-        )}
         {autenticado && <TogglePush />}
         {autenticado && (
           <div className={styles.campanaWrapper} ref={campanaRef}>
