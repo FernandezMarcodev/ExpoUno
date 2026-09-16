@@ -49,7 +49,7 @@ const Inicio = () => {
   }, [conciertosBase]);
 
   const setSeguidosNorm = useMemo(
-    () => new Set(seguidos.map((a) => a.trim().toLowerCase())),
+    () => new Set(seguidos.map((a) => normalizarTexto(a))),
     [seguidos]
   );
 
@@ -116,6 +116,10 @@ const Inicio = () => {
     }
     setVista(nueva);
   };
+
+  useEffect(() => {
+    if (!autenticado) setVista('todos');
+  }, [autenticado]);
 
   useEffect(() => {
     if (!conciertosBase || conciertosBase.length === 0) return;
@@ -188,7 +192,7 @@ const Inicio = () => {
         <Filtros filtros={filtros} setFiltros={setFiltros} artistas={artistas} />
 
         <div className="tabs-vista" role="tablist" aria-label="Vista de conciertos">
-          {VISTAS.map((v) => (
+          {VISTAS.filter((v) => v.valor === 'todos' || autenticado).map((v) => (
             <button
               key={v.valor}
               role="tab"
