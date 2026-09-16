@@ -233,6 +233,11 @@ html.dark .logo-principal {
   width: 100%;
   min-width: 0;
   scroll-margin-top: 76px;
+  height: var(--altura-mapa, 560px);
+}
+
+.contenedor-grid > .col-mapa:empty {
+  height: auto;
 }
 
 .col-lista {
@@ -259,6 +264,52 @@ html.dark .logo-principal {
   background-color: var(--color-text-tertiary);
 }
 
+/* ====== TABS DE VISTA ====== */
+.tabs-vista {
+  display: flex;
+  gap: 4px;
+  padding: 4px;
+  margin-bottom: var(--space-6);
+  background-color: var(--color-surface);
+  border: 1px solid var(--color-border);
+  border-radius: var(--radius-full);
+  box-shadow: var(--shadow-xs);
+  width: fit-content;
+}
+
+.tab-vista {
+  flex: 1;
+  padding: 8px 20px;
+  border: none;
+  border-radius: var(--radius-full);
+  background-color: transparent;
+  color: var(--color-text-secondary);
+  font-size: var(--text-sm);
+  font-weight: var(--font-semibold);
+  font-family: inherit;
+  white-space: nowrap;
+  cursor: pointer;
+  transition: background-color var(--transition-base),
+              color var(--transition-base),
+              box-shadow var(--transition-base);
+}
+
+.tab-vista:hover {
+  color: var(--color-text);
+  background-color: var(--color-bg-subtle);
+}
+
+.tab-vistaActiva {
+  background-color: var(--color-accent);
+  color: #ffffff;
+  box-shadow: var(--shadow-sm);
+}
+
+.tab-vistaActiva:hover {
+  background-color: var(--color-accent-hover);
+  color: #ffffff;
+}
+
 /* ====== RESPONSIVE ====== */
 @media (max-width: 960px) {
   .contenedor-grid {
@@ -283,6 +334,15 @@ html.dark .logo-principal {
 
   .titulo-section {
     padding: var(--space-6) 0 var(--space-4);
+  }
+
+  .tabs-vista {
+    width: 100%;
+  }
+
+  .tab-vista {
+    padding: 8px 12px;
+    font-size: var(--text-xs);
   }
 }
 

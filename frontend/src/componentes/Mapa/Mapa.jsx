@@ -29,8 +29,10 @@ const CambiarVistaMapa = ({ centro, zoom }) => {
     if (!centro) return;
     const posicion = Array.isArray(centro) ? centro : [centro.lat, centro.lng];
     try {
-      mapa.closePopup(); 
-    } catch { }
+      mapa.closePopup();
+    } catch {
+      // Popup aún no creado en pantallas pequeñas
+    }
     mapa.setView(posicion, zoom || 11, { animate: true, duration: 1 });
   }, [centro, zoom, mapa]);
 
@@ -162,12 +164,16 @@ function Mapa({ centro, zoom, conciertos = [], ubicacionUsuario, radioKm, selecc
       if (ref && ref._source) {
         try {
           map.flyTo([grupo.lat, grupo.lng], zoom || 15, { animate: true, duration: 0.8 });
-        } catch { }
+        } catch {
+          // La animación puede fallar si el contenedor aún no tiene dimensiones
+        }
         try {
           ref.openOn(map);
-        } catch { }
+        } catch {
+          // El popup puede no estar listo si el zoom aún está cargando
+        }
       }
-    }, [seleccionadoId, grupos, zoom]);
+    }, [seleccionadoId, map]);
 
     return null;
   };
@@ -180,7 +186,7 @@ function Mapa({ centro, zoom, conciertos = [], ubicacionUsuario, radioKm, selecc
         zoomControl={false}
         maxBounds={ARG_MAX_BOUNDS}
         maxBoundsViscosity={1.0}
-        style={{ width: "100%", height: "700px" }}
+        style={{ width: "100%", height: "100%" }}
         className={styles.mapa}
       >
         <CambiarVistaMapa centro={centro} zoom={zoom} />
@@ -222,7 +228,6 @@ function Mapa({ centro, zoom, conciertos = [], ubicacionUsuario, radioKm, selecc
         {grupos.map(grupo => {
           const key = `${grupo.lat},${grupo.lng}`;
           const lista = grupo.conciertos;
-          const seleccionadoEnGrupo = lista.find(c => c.id === seleccionadoId);
           return (
             <Marker
               key={key}
