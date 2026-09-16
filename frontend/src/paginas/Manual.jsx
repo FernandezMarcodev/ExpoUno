@@ -1,6 +1,9 @@
-import { useEffect } from "react";
-import { FaTimes } from "react-icons/fa";
-import styles from "./manualUsuario.module.css";
+import React from 'react';
+import { Link } from 'react-router-dom';
+import { FaArrowLeft } from 'react-icons/fa';
+import Encabezado from '../componentes/Encabezado/Encabezado';
+import PieDePagina from '../componentes/PieDePagina/PieDePagina';
+import styles from './manual.module.css';
 
 const SECCIONES = [
   {
@@ -39,8 +42,9 @@ const SECCIONES = [
     titulo: "Seguir artistas y recibir avisos",
     pasos: [
       "Tocá «Seguir» en un concierto para seguir al artista.",
-      "La campana de novedades del encabezado muestra los nuevos shows de tus artistas.",
-      "Activá las notificaciones tocando la campana de notificaciones y aceptando el permiso.",
+      "La campana del encabezado muestra los nuevos shows de tus artistas seguidos.",
+      "Dentro de esa campana, activá el botoncito «Activar» para recibir notificaciones push, y aceptá el permiso del navegador.",
+      "El botoncito pasa a decir «Desactivar» cuando las notificaciones están encendidas.",
     ],
   },
   {
@@ -53,27 +57,18 @@ const SECCIONES = [
   },
 ];
 
-const ManualUsuario = ({ abierto, alCerrar }) => {
-  useEffect(() => {
-    if (!abierto) return;
-    const alTecla = (evento) => {
-      if (evento.key === "Escape") alCerrar();
-    };
-    document.addEventListener("keydown", alTecla);
-    return () => document.removeEventListener("keydown", alTecla);
-  }, [abierto, alCerrar]);
-
-  if (!abierto) return null;
-
+function Manual() {
   return (
-    <div className={styles.envoltura} onClick={alCerrar} role="dialog" aria-modal="true" aria-label="Cómo usar Concierto Finder">
-      <div className={styles.modal} onClick={(evento) => evento.stopPropagation()}>
-        <div className={styles.cabecera}>
-          <h2 className={styles.titulo}>¿Cómo usar Concierto Finder?</h2>
-          <button className={styles.botonCerrar} onClick={alCerrar} aria-label="Cerrar manual" title="Cerrar">
-            <FaTimes className={styles.iconoCerrar} />
-          </button>
-        </div>
+    <div className="pagina-inicio">
+      <Encabezado />
+
+      <main className="contenedor-principal">
+        <section className="titulo-section">
+          <h2 className="titulo-principal">¿Cómo usar Concierto Finder?</h2>
+          <p className="descripcion-principal">
+            Guía rápida para aprovechar la página al máximo
+          </p>
+        </section>
 
         <div className={styles.cuerpo}>
           {SECCIONES.map((seccion) => (
@@ -81,17 +76,24 @@ const ManualUsuario = ({ abierto, alCerrar }) => {
               <h3 className={styles.tituloSeccion}>{seccion.titulo}</h3>
               <ol className={styles.listaPasos}>
                 {seccion.pasos.map((paso, indice) => (
-                  <li key={indice} className={styles.paso}>
-                    {paso}
-                  </li>
+                  <li key={indice} className={styles.paso}>{paso}</li>
                 ))}
               </ol>
             </section>
           ))}
+
+          <div className={styles.final}>
+            <Link to="/" className={styles.botonVolver}>
+              <FaArrowLeft className={styles.iconoVolver} />
+              Volver al inicio
+            </Link>
+          </div>
         </div>
-      </div>
+      </main>
+
+      <PieDePagina />
     </div>
   );
-};
+}
 
-export default ManualUsuario;
+export default Manual;

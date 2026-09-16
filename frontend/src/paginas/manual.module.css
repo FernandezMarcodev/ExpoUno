@@ -1,0 +1,78 @@
+.cuerpo {
+  max-width: 720px;
+  margin: 0 auto;
+  padding: var(--space-6) 0;
+}
+
+.seccion {
+  margin-bottom: var(--space-6);
+  padding: var(--space-5);
+  border: 1px solid var(--color-border);
+  border-radius: var(--radius-lg);
+  background-color: var(--color-surface);
+}
+
+.tituloSeccion {
+  margin: 0 0 var(--space-3);
+  font-size: var(--text-lg);
+  font-weight: var(--font-bold);
+  color: var(--color-accent);
+}
+
+.listaPasos {
+  margin: 0;
+  padding-left: var(--space-5);
+}
+
+.paso {
+  font-size: var(--text-base);
+  line-height: 1.6;
+  color: var(--color-text-secondary);
+  margin-bottom: var(--space-2);
+}
+
+.paso:last-child {
+  margin-bottom: 0;
+}
+
+.final {
+  display: flex;
+  justify-content: center;
+  margin-top: var(--space-6);
+}
+
+.botonVolver {
+  display: inline-flex;
+  align-items: center;
+  gap: var(--space-2);
+  padding: var(--space-2) var(--space-5);
+  border-radius: var(--radius-full);
+  border: 1px solid var(--color-border);
+  background-color: var(--color-surface);
+  color: var(--color-text);
+  font-size: var(--text-sm);
+  font-weight: var(--font-semibold);
+  text-decoration: none;
+  transition: background-color var(--transition-base),
+              border-color var(--transition-base);
+}
+
+.botonVolver:hover {
+  background-color: var(--color-bg-subtle);
+  border-color: var(--color-text-tertiary);
+}
+
+.iconoVolver {
+  width: 14px;
+  height: 14px;
+}
+
+@media (max-width: 640px) {
+  .cuerpo {
+    padding: var(--space-4) 0;
+  }
+
+  .seccion {
+    padding: var(--space-4);
+  }
+}

@@ -2,7 +2,7 @@
 
 Concierto Finder te permite descubrir los próximos conciertos en Buenos Aires y alrededores, seguirlos, marcarlos como favoritos y recibir avisos cuando tus artistas tengan novedades.
 
-> **Guía interactiva**: dentro de la página, tocá el botón **¿Cómo usar?** (ícono de signo de pregunta en el encabezado) para ver esta guía paso a paso en el propio sitio.
+> **Guía interactiva**: dentro de la página, tocá el botón **¿Cómo usar?** (ícono de signo de pregunta en el encabezado) para abrir esta guía en su propia página y volver al inicio cuando quieras.
 
 ---
 
@@ -80,21 +80,18 @@ El mapa muestra un marcador por cada lugar. Al tocar un marcador:
 
 ---
 
-## 7. Novedades de artistas seguidos
+## 7. Novedades y notificaciones push
 
-- La **campana de novedades** en el encabezado te muestra los nuevos conciertos de los artistas que seguís.
-- Un **contador** indica cuántas novedades sin leer tenés.
+La **campana** del encabezado reúne todo en una sola tarjeta:
+
+- Los **nuevos conciertos** de los artistas que seguís, con un **contador** de novedades sin leer.
 - Podés **marcar todas** como leídas o tocar cada novedad para marcarla como leída.
+- Arriba hay un **botoncito «Activar» / «Desactivar»** para las notificaciones push.
 
----
+> Requisito para push: iniciar sesión y que el navegador soporte notificaciones.
 
-## 8. Activar notificaciones push
-
-> Requisito: iniciar sesión y que el navegador soporte notificaciones.
-
-- En el encabezado, tocá la **campana de activar notificaciones** (ícono de campana).
-- El navegador te pedirá permiso para mostrar notificaciones: aceptalo.
-- Cuando la campana queda **activa**, vas a recibir un aviso automático cuando un artista que seguís sume un nuevo concierto, incluso con la pestaña cerrada.
+- Tocá **«Activar»** dentro de la campana y aceptá el permiso del navegador.
+- Cuando el botoncito pasa a **«Desactivar»**, vas a recibir un aviso automático cuando un artista que seguís sume un nuevo concierto, incluso con la pestaña cerrada.
 
 ---
 
@@ -132,11 +129,11 @@ Sí. El mapa muestra todos los conciertos por defecto; la ubicación solo se usa
 
 ### ¿Cómo me entero cuando un artista que sigo saca un show nuevo?
 Dos vías:
-1. La **campana de novedades** en el encabezado (dentro de la app).
-2. Las **notificaciones push** si las activaste (llegan también con la app cerrada).
+1. La **campana** en el encabezado (dentro de la app) muestra sus novedades.
+2. Las **notificaciones push** si las activaste desde esa misma campana (llegan también con la app cerrada).
 
 ### ¿Qué hago si no me llegan las notificaciones push?
-Verificá que: iniciaste sesión, tocaste la campana de activar, aceptaste el permiso del navegador y estás siguiendo al artista correspondiente.
+Verificá que: iniciaste sesión, tocaste **«Activar»** en la campana del encabezado, aceptaste el permiso del navegador y estás siguiendo al artista correspondiente.
 
 ---
 
